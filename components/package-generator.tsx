@@ -70,6 +70,8 @@ const fieldClassName =
 
 const textareaClassName =
   `${fieldClassName} min-h-[84px] resize-none text-[1.3rem] font-semibold leading-8 text-[#2F2722] placeholder:text-[1.08rem] placeholder:font-medium placeholder:text-[#9B8A79]`;
+const topicTextareaClassName =
+  `${fieldClassName} min-h-[92px] resize-none text-[1.2rem] font-semibold leading-[1.55] text-[#183A59] placeholder:text-[1rem] placeholder:font-medium placeholder:text-[#8F8275] sm:text-[1.35rem]`;
 
 const resultToolButtonClassName =
   "min-w-[112px] rounded-full border px-5 py-3 text-sm font-semibold transition";
@@ -1335,7 +1337,7 @@ export function PackageGenerator({
                       ? "可留空，系统会按测试名称和知识点自动生成"
                       : "例如：一元一次方程"
                   }
-                  className={textareaClassName}
+                  className={topicTextareaClassName}
                 />
               </label>
 
