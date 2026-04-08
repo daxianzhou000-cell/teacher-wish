@@ -1,3 +1,5 @@
+import type { ModelSettings } from "@/lib/types/model-settings";
+
 export type Subject = "语文" | "数学" | "英语";
 export type Grade = "七年级" | "八年级" | "九年级";
 export type StudentLevel = "基础薄弱" | "普通" | "提分";
@@ -113,3 +115,8 @@ export type GenerateResult =
     };
 
 export type ModelProviderName = "mock" | "openai" | "anthropic" | "custom";
+
+export type GenerateRequestEnvelope = {
+  input: GenerateRequest;
+  modelSettings?: ModelSettings;
+};

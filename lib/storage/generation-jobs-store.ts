@@ -8,12 +8,14 @@ import type {
   LessonPackage,
   StageTestResult,
 } from "@/lib/types/lesson-package";
+import type { ModelSettings } from "@/lib/types/model-settings";
 
 export type GenerationJobStatus = "pending" | "running" | "completed" | "failed";
 
 export type GenerationJob = {
   id: string;
   input: GenerateRequest;
+  modelSettings: ModelSettings | null;
   status: GenerationJobStatus;
   result: GenerateResult | null;
   error: string;
@@ -32,6 +34,8 @@ const defaultData: GenerationJobFile = {
   jobs: [],
 };
 const ACTIVE_JOB_STALE_AFTER_MS = 3 * 60 * 1000;
+let generationJobStorageAvailable: boolean | null = null;
+let memoryData: GenerationJobFile = defaultData;
 
 function isGenerationJobStatus(value: unknown): value is GenerationJobStatus {
   return value === "pending" || value === "running" || value === "completed" || value === "failed";
@@ -115,18 +119,34 @@ function normalizeJobResult(value: unknown): GenerateResult | null {
   };
 }
 
-async function ensureDataFile() {
-  await mkdir(dataDir, { recursive: true });
+async function ensureDataFile(): Promise<boolean> {
+  if (generationJobStorageAvailable === false) {
+    return false;
+  }
 
   try {
-    await readFile(dataFile, "utf-8");
+    await mkdir(dataDir, { recursive: true });
+
+    try {
+      await readFile(dataFile, "utf-8");
+    } catch {
+      await writeFile(dataFile, JSON.stringify(defaultData, null, 2), "utf-8");
+    }
+
+    generationJobStorageAvailable = true;
+    return true;
   } catch {
-    await writeFile(dataFile, JSON.stringify(defaultData, null, 2), "utf-8");
+    generationJobStorageAvailable = false;
+    return false;
   }
 }
 
 async function readData(): Promise<GenerationJobFile> {
-  await ensureDataFile();
+  const storageAvailable = await ensureDataFile();
+
+  if (!storageAvailable) {
+    return memoryData;
+  }
 
   try {
     const content = await readFile(dataFile, "utf-8");
@@ -157,6 +177,10 @@ async function readData(): Promise<GenerationJobFile> {
               const nextJob = recoverJob({
                 id: record.id,
                 input: record.input,
+                modelSettings:
+                  record.modelSettings && typeof record.modelSettings === "object"
+                    ? (record.modelSettings as ModelSettings)
+                    : null,
                 status: record.status,
                 result: normalizeJobResult(record.result),
                 error: record.error,
@@ -178,23 +202,38 @@ async function readData(): Promise<GenerationJobFile> {
       await writeData(normalized);
     }
 
+    memoryData = normalized;
     return normalized;
   } catch {
-    return defaultData;
+    return memoryData;
   }
 }
 
 async function writeData(data: GenerationJobFile) {
-  await ensureDataFile();
-  await writeFile(dataFile, JSON.stringify(data, null, 2), "utf-8");
+  memoryData = data;
+
+  const storageAvailable = await ensureDataFile();
+  if (!storageAvailable) {
+    return;
+  }
+
+  try {
+    await writeFile(dataFile, JSON.stringify(data, null, 2), "utf-8");
+  } catch {
+    generationJobStorageAvailable = false;
+  }
 }
 
-export async function createGenerationJob(input: GenerateRequest): Promise<GenerationJob> {
+export async function createGenerationJob(
+  input: GenerateRequest,
+  modelSettings: ModelSettings | null = null,
+): Promise<GenerationJob> {
   const data = await readData();
   const now = new Date().toISOString();
   const job: GenerationJob = {
     id: randomUUID(),
     input,
+    modelSettings,
     status: "pending",
     result: null,
     error: "",

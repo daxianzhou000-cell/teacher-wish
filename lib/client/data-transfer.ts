@@ -26,6 +26,7 @@ const BACKUP_META_KEYS = new Set([
   "lesson-package-draft",
   "student-detail-active-stage-test-job",
   "model-settings-cache",
+  "prompt-settings-cache",
   LOCAL_PRIMARY_STUDENT_RECORDS_SEEDED_KEY,
   LAST_BACKUP_AT_KEY,
 ]);

@@ -5,10 +5,18 @@ import {
   removeCachedGenerationJob,
   writeCachedGenerationJob,
 } from "@/lib/client/generation-job-cache";
+import { readCachedModelSettings } from "@/lib/client/model-settings-cache";
+import { shouldUseLocalPrimaryStorage } from "@/lib/client/storage-mode";
+import { normalizeGenerateResult } from "@/lib/normalizers/follow-up-generation";
+import { buildLessonPackagePrompt } from "@/lib/prompts/lesson-package";
+import { buildMockLessonPackage, buildMockStageTest } from "@/lib/providers/mock/data";
+import { requestOpenAICompatibleLessonPackage } from "@/lib/providers/shared/openai-compatible";
 import type {
+  GenerateRequestEnvelope,
   GenerateRequest,
   GenerateResult,
 } from "@/lib/types/lesson-package";
+import type { ModelConnectionSettings, ModelSettings } from "@/lib/types/model-settings";
 
 type ErrorPayload = {
   error?: string;
@@ -50,6 +58,132 @@ function normalizeJobPayload(
   };
 }
 
+function buildDirectGenerationAttempts(settings: ModelSettings | null): ModelConnectionSettings[] {
+  if (!settings) {
+    return [];
+  }
+
+  const attempts: ModelConnectionSettings[] = [];
+
+  if (settings.primaryMode === "custom") {
+    const primary = {
+      ...settings.primaryCustom,
+      apiKey: settings.primaryCustom.apiKey.trim(),
+    };
+
+    if (
+      primary.provider === "mock" ||
+      (primary.enabled && primary.baseUrl.trim() && primary.model.trim() && primary.apiKey.trim())
+    ) {
+      attempts.push(primary);
+    }
+  }
+
+  const backup = {
+    ...settings.backup,
+    apiKey: settings.backup.apiKey.trim(),
+  };
+
+  if (
+    settings.autoFallback &&
+    backup.enabled &&
+    (backup.provider === "mock" ||
+      (backup.baseUrl.trim() && backup.model.trim() && backup.apiKey.trim()))
+  ) {
+    attempts.push(backup);
+  }
+
+  return attempts;
+}
+
+async function generateDirectly(
+  input: GenerateRequest,
+  settings: ModelSettings | null,
+): Promise<GenerateResult> {
+  const attempts = buildDirectGenerationAttempts(settings);
+
+  if (!attempts.length) {
+    throw new Error("当前环境无法直接本地生成，请先使用用户自配主模型或保留可用备用模型。");
+  }
+
+  const prompt = buildLessonPackagePrompt(input);
+  const errors: string[] = [];
+
+  for (const config of attempts) {
+    try {
+      if (config.provider === "mock") {
+        const raw =
+          input.mode === "stage_test" ? buildMockStageTest(input) : buildMockLessonPackage(input);
+        return normalizeGenerateResult(input, raw);
+      }
+
+      const providerLabel = config.provider === "openai" ? "OpenAI" : "自定义模型";
+      const raw = await requestOpenAICompatibleLessonPackage(
+        input,
+        {
+          prompt,
+          config,
+        },
+        {
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+          model: config.model,
+          providerLabel,
+        },
+      );
+
+      return normalizeGenerateResult(input, raw);
+    } catch (error) {
+      errors.push(
+        `${config.provider}: ${error instanceof Error ? error.message : "模型调用失败。"}`,
+      );
+    }
+  }
+
+  throw new Error(errors.join("；") || "本地生成失败。");
+}
+
+async function createLocalGenerationJob(
+  input: GenerateRequest,
+  modelSettings: ModelSettings | null,
+): Promise<ClientGenerationJob> {
+  const jobId = crypto.randomUUID();
+  await writeCachedGenerationJob({
+    jobId,
+    status: "running",
+    input,
+  });
+
+  try {
+    const data = await generateDirectly(input, modelSettings);
+    const completed: ClientGenerationJob = {
+      jobId,
+      status: "completed",
+      input,
+      data,
+    };
+    await writeCachedGenerationJob(completed);
+    return completed;
+  } catch (error) {
+    const failed: ClientGenerationJob = {
+      jobId,
+      status: "failed",
+      input,
+      error: error instanceof Error ? error.message : "本地生成失败。",
+    };
+    await writeCachedGenerationJob(failed);
+    throw error;
+  }
+}
+
+async function shouldUseDirectGeneration(modelSettings: ModelSettings | null): Promise<boolean> {
+  if (!(await shouldUseLocalPrimaryStorage())) {
+    return false;
+  }
+
+  return buildDirectGenerationAttempts(modelSettings).length > 0;
+}
+
 async function parseJobResponse(
   response: Response,
   fallbackJobId?: string,
@@ -73,36 +207,72 @@ async function parseJobResponse(
 export async function createGenerationJob(
   input: GenerateRequest,
 ): Promise<ClientGenerationJob> {
-  const response = await fetch("/api/generate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
-
-  const job = await parseJobResponse(response);
-  await writeCachedGenerationJob({
-    jobId: job.jobId,
-    status: job.status,
+  const modelSettings = await readCachedModelSettings();
+  const payload: GenerateRequestEnvelope = {
     input,
-    data: job.data,
-    error: job.error,
-  });
-  return {
-    ...job,
-    input,
+    modelSettings: modelSettings ?? undefined,
   };
+
+  if (await shouldUseDirectGeneration(modelSettings)) {
+    return createLocalGenerationJob(input, modelSettings);
+  }
+
+  try {
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const job = await parseJobResponse(response);
+    await writeCachedGenerationJob({
+      jobId: job.jobId,
+      status: job.status,
+      input,
+      data: job.data,
+      error: job.error,
+    });
+    return {
+      ...job,
+      input,
+    };
+  } catch (error) {
+    if (await shouldUseLocalPrimaryStorage()) {
+      return createLocalGenerationJob(input, modelSettings);
+    }
+
+    throw error;
+  }
 }
 
 export async function fetchGenerationJob(
   jobId: string,
 ): Promise<ClientGenerationJob> {
-  const response = await fetch(`/api/generate?jobId=${jobId}`, {
-    cache: "no-store",
-  });
+  if (await shouldUseLocalPrimaryStorage()) {
+    const cached = await readCachedGenerationJob(jobId);
 
-  return parseJobResponse(response, jobId);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  try {
+    const response = await fetch(`/api/generate?jobId=${jobId}`, {
+      cache: "no-store",
+    });
+
+    return parseJobResponse(response, jobId);
+  } catch (error) {
+    const cached = await readCachedGenerationJob(jobId);
+
+    if (cached) {
+      return cached;
+    }
+
+    throw error;
+  }
 }
 
 export async function hydrateGenerationJob(

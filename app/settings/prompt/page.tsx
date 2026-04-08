@@ -1,10 +1,8 @@
 import { PromptSettingsPage } from "@/components/prompt-settings-page";
-import { readPromptSettings } from "@/lib/storage/prompt-settings-store";
+import { getDefaultPromptSettings } from "@/lib/storage/prompt-settings-store";
 
-export const dynamic = "force-dynamic";
-
-export default async function PromptSettingsRoute() {
-  const settings = await readPromptSettings();
+export default function PromptSettingsRoute() {
+  const settings = getDefaultPromptSettings();
 
   return <PromptSettingsPage initialSettings={settings} />;
 }

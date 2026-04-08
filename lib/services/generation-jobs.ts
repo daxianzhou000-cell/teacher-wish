@@ -5,11 +5,15 @@ import {
   updateGenerationJob,
 } from "@/lib/storage/generation-jobs-store";
 import type { GenerateRequest } from "@/lib/types/lesson-package";
+import type { ModelSettings } from "@/lib/types/model-settings";
 
 const runningJobs = new Set<string>();
 
-export async function enqueueGenerationJob(input: GenerateRequest) {
-  const job = await createGenerationJob(input);
+export async function enqueueGenerationJob(
+  input: GenerateRequest,
+  modelSettings?: ModelSettings,
+) {
+  const job = await createGenerationJob(input, modelSettings ?? null);
   void runGenerationJob(job.id);
   return job;
 }
@@ -37,7 +41,7 @@ async function runGenerationJob(jobId: string) {
       error: "",
     });
 
-    const result = await generateLessonPackage(job.input);
+    const result = await generateLessonPackage(job.input, job.modelSettings ?? undefined);
 
     await updateGenerationJob(jobId, {
       status: "completed",

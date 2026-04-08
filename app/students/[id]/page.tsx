@@ -1,20 +1,9 @@
-import { notFound } from "next/navigation";
+import { StudentDetailRoutePage } from "@/components/student-detail-route-page";
 
-import { StudentDetailPage } from "@/components/student-detail-page";
-import { getStudentDetail } from "@/lib/repositories/student-progress";
-
-export const dynamic = "force-dynamic";
-
-export default async function StudentDetailRoute({
+export default function StudentDetailRoute({
   params,
 }: {
   params: { id: string };
 }) {
-  const detail = await getStudentDetail(params.id);
-
-  if (!detail) {
-    notFound();
-  }
-
-  return <StudentDetailPage {...detail} />;
+  return <StudentDetailRoutePage studentId={params.id} />;
 }

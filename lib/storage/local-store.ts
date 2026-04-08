@@ -17,6 +17,8 @@ const defaultData: AppData = {
   students: [],
   records: [],
 };
+let appDataStorageAvailable: boolean | null = null;
+let memoryAppData: AppData = defaultData;
 
 function isGrade(value: unknown): value is GenerateRequest["grade"] {
   return value === "七年级" || value === "八年级" || value === "九年级";
@@ -215,18 +217,34 @@ function normalizeRecord(record: Partial<TutoringRecord>): TutoringRecord | null
   };
 }
 
-async function ensureDataFile() {
-  await mkdir(dataDir, { recursive: true });
+async function ensureDataFile(): Promise<boolean> {
+  if (appDataStorageAvailable === false) {
+    return false;
+  }
 
   try {
-    await readFile(dataFile, "utf-8");
+    await mkdir(dataDir, { recursive: true });
+
+    try {
+      await readFile(dataFile, "utf-8");
+    } catch {
+      await writeFile(dataFile, JSON.stringify(defaultData, null, 2), "utf-8");
+    }
+
+    appDataStorageAvailable = true;
+    return true;
   } catch {
-    await writeFile(dataFile, JSON.stringify(defaultData, null, 2), "utf-8");
+    appDataStorageAvailable = false;
+    return false;
   }
 }
 
 export async function readAppData(): Promise<AppData> {
-  await ensureDataFile();
+  const storageAvailable = await ensureDataFile();
+
+  if (!storageAvailable) {
+    return memoryAppData;
+  }
 
   try {
     const content = await readFile(dataFile, "utf-8");
@@ -247,18 +265,33 @@ export async function readAppData(): Promise<AppData> {
     };
 
     if (JSON.stringify(normalized) !== content.trim()) {
-      await writeFile(dataFile, JSON.stringify(normalized, null, 2), "utf-8");
+      try {
+        await writeFile(dataFile, JSON.stringify(normalized, null, 2), "utf-8");
+      } catch {
+        appDataStorageAvailable = false;
+      }
     }
 
+    memoryAppData = normalized;
     return normalized;
   } catch {
-    return defaultData;
+    return memoryAppData;
   }
 }
 
 export async function writeAppData(data: AppData): Promise<void> {
-  await ensureDataFile();
-  await writeFile(dataFile, JSON.stringify(data, null, 2), "utf-8");
+  memoryAppData = data;
+
+  const storageAvailable = await ensureDataFile();
+  if (!storageAvailable) {
+    return;
+  }
+
+  try {
+    await writeFile(dataFile, JSON.stringify(data, null, 2), "utf-8");
+  } catch {
+    appDataStorageAvailable = false;
+  }
 }
 
 export function getAppDataFilePath() {

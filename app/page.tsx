@@ -1,8 +1,5 @@
 import { PackageGenerator } from "@/components/package-generator";
-import { listStudents } from "@/lib/repositories/student-progress";
 import type { GenerateRequest } from "@/lib/types/lesson-package";
-
-export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -94,12 +91,11 @@ export default async function HomePage({
 }: {
   searchParams?: SearchParams;
 }) {
-  const students = await listStudents();
   const { prefillForm, prefillStudentId, followUpPrefill } = parsePrefill(searchParams);
 
   return (
     <PackageGenerator
-      initialStudents={students}
+      initialStudents={[]}
       initialForm={prefillForm}
       initialStudentId={prefillStudentId}
       initialFollowUpPrefill={followUpPrefill}

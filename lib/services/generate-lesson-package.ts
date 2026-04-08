@@ -1,14 +1,20 @@
 import { normalizeGenerateResult } from "@/lib/normalizers/follow-up-generation";
 import { buildLessonPackagePrompt } from "@/lib/prompts/lesson-package";
 import { getLessonPackageProviderByName } from "@/lib/providers/registry";
-import { readResolvedModelSettings } from "@/lib/storage/model-settings-store";
+import {
+  readResolvedModelSettings,
+  resolveModelSettings,
+} from "@/lib/storage/model-settings-store";
 import type { GenerateRequest, GenerateResult } from "@/lib/types/lesson-package";
-import type { ModelConnectionSettings } from "@/lib/types/model-settings";
+import type { ModelConnectionSettings, ModelSettings } from "@/lib/types/model-settings";
 
 export async function generateLessonPackage(
   input: GenerateRequest,
+  modelSettingsOverride?: ModelSettings,
 ): Promise<GenerateResult> {
-  const settings = await readResolvedModelSettings();
+  const settings = modelSettingsOverride
+    ? resolveModelSettings(modelSettingsOverride, { includeRuntimeCache: true })
+    : await readResolvedModelSettings();
   const prompt = buildLessonPackagePrompt(input);
   const attempts: ModelConnectionSettings[] = [];
   const errors: string[] = [];

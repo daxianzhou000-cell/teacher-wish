@@ -30,6 +30,9 @@ const builtinPrimaryDefaults = {
   customBaseUrl: "https://api.gemai.cc/v1",
 };
 
+let modelSettingsStorageAvailable: boolean | null = null;
+let memorySettings: ModelSettings | null = null;
+
 let envLocalCache:
   | {
       mtimeMs: number;
@@ -163,6 +166,10 @@ function defaultSettings(): ModelSettings {
   };
 }
 
+export function getDefaultModelSettings(): ModelSettings {
+  return defaultSettings();
+}
+
 export function getBuiltinPrimaryConnection(modelOverride?: string): ModelConnectionSettings {
   const envProvider = getRuntimeEnvValue("MODEL_PROVIDER");
   const primaryProvider = isProvider(envProvider) ? envProvider : builtinPrimaryDefaults.provider;
@@ -274,18 +281,34 @@ export function resolveModelSettings(
   };
 }
 
-async function ensureSettingsFile() {
-  await mkdir(dataDir, { recursive: true });
+async function ensureSettingsFile(): Promise<boolean> {
+  if (modelSettingsStorageAvailable === false) {
+    return false;
+  }
 
   try {
-    await readFile(settingsFile, "utf-8");
+    await mkdir(dataDir, { recursive: true });
+
+    try {
+      await readFile(settingsFile, "utf-8");
+    } catch {
+      await writeFile(settingsFile, JSON.stringify(defaultSettings(), null, 2), "utf-8");
+    }
+
+    modelSettingsStorageAvailable = true;
+    return true;
   } catch {
-    await writeFile(settingsFile, JSON.stringify(defaultSettings(), null, 2), "utf-8");
+    modelSettingsStorageAvailable = false;
+    return false;
   }
 }
 
 export async function readModelSettings(): Promise<ModelSettings> {
-  await ensureSettingsFile();
+  const storageAvailable = await ensureSettingsFile();
+
+  if (!storageAvailable) {
+    return memorySettings ?? defaultSettings();
+  }
 
   try {
     const content = await readFile(settingsFile, "utf-8");
@@ -335,12 +358,17 @@ export async function readModelSettings(): Promise<ModelSettings> {
     };
 
     if (hasLegacyPersistedApiKey) {
-      await writeFile(settingsFile, JSON.stringify(normalized, null, 2), "utf-8");
+      try {
+        await writeFile(settingsFile, JSON.stringify(normalized, null, 2), "utf-8");
+      } catch {
+        modelSettingsStorageAvailable = false;
+      }
     }
 
+    memorySettings = normalized;
     return normalized;
   } catch {
-    return defaultSettings();
+    return memorySettings ?? defaultSettings();
   }
 }
 
@@ -350,8 +378,6 @@ export async function readResolvedModelSettings(): Promise<ResolvedModelSettings
 }
 
 export async function writeModelSettings(input: ModelSettings): Promise<void> {
-  await ensureSettingsFile();
-
   setRuntimeApiKey("primary", input.primaryCustom.provider, input.primaryCustom.apiKey);
   setRuntimeApiKey("backup", input.backup.provider, input.backup.apiKey);
 
@@ -361,7 +387,19 @@ export async function writeModelSettings(input: ModelSettings): Promise<void> {
     backup: sanitizeConnectionForStorage(input.backup),
   };
 
-  await writeFile(settingsFile, JSON.stringify(sanitized, null, 2), "utf-8");
+  memorySettings = sanitized;
+
+  const storageAvailable = await ensureSettingsFile();
+
+  if (!storageAvailable) {
+    return;
+  }
+
+  try {
+    await writeFile(settingsFile, JSON.stringify(sanitized, null, 2), "utf-8");
+  } catch {
+    modelSettingsStorageAvailable = false;
+  }
 }
 
 export function getBuiltinApiKeyAvailability(): Record<"openai" | "custom", boolean> {

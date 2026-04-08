@@ -5,10 +5,29 @@ import {
   enqueueGenerationJob,
   readGenerationJob,
 } from "@/lib/services/generation-jobs";
+import type { GenerateRequestEnvelope } from "@/lib/types/lesson-package";
+import type { ModelSettings } from "@/lib/types/model-settings";
+
+function parseModelSettings(value: unknown): ModelSettings | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as ModelSettings;
+}
 
 export async function POST(request: Request) {
   try {
-    const input = parseGenerateRequest(await request.json());
+    const body = (await request.json()) as GenerateRequestEnvelope | Record<string, unknown>;
+    const rawInput =
+      body && typeof body === "object" && "input" in body
+        ? (body as GenerateRequestEnvelope).input
+        : body;
+    const modelSettings =
+      body && typeof body === "object" && "input" in body
+        ? parseModelSettings((body as GenerateRequestEnvelope).modelSettings)
+        : undefined;
+    const input = parseGenerateRequest(rawInput);
 
     if (!input) {
       return NextResponse.json(
@@ -17,7 +36,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const job = await enqueueGenerationJob(input);
+    const job = await enqueueGenerationJob(input, modelSettings);
 
     return NextResponse.json({
       jobId: job.id,

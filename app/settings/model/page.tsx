@@ -1,14 +1,12 @@
 import { ModelSettingsPage } from "@/components/model-settings-page";
 import {
+  getDefaultModelSettings,
   getBuiltinPrimaryConnection,
   getBuiltinApiKeyAvailability,
-  readModelSettings,
 } from "@/lib/storage/model-settings-store";
 
-export const dynamic = "force-dynamic";
-
 export default async function ModelSettingsRoute() {
-  const settings = await readModelSettings();
+  const settings = getDefaultModelSettings();
   const builtinApiKeyAvailability = getBuiltinApiKeyAvailability();
   const builtinPrimary = getBuiltinPrimaryConnection(settings.builtinPrimaryModel);
 

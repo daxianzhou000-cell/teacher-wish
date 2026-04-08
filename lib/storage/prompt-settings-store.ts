@@ -5,6 +5,8 @@ import type { PromptSettings } from "@/lib/types/prompt-settings";
 
 const dataDir = path.join(process.cwd(), "data");
 const settingsFile = path.join(dataDir, "prompt-settings.json");
+let promptSettingsStorageAvailable: boolean | null = null;
+let memoryPromptSettings: PromptSettings | null = null;
 
 export function buildDefaultPromptSettings(): PromptSettings {
   return {
@@ -26,33 +28,53 @@ export function buildDefaultPromptSettings(): PromptSettings {
   };
 }
 
+export function getDefaultPromptSettings(): PromptSettings {
+  return buildDefaultPromptSettings();
+}
+
 function normalizeText(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
-async function ensureSettingsFile() {
-  await mkdir(dataDir, { recursive: true });
+async function ensureSettingsFile(): Promise<boolean> {
+  if (promptSettingsStorageAvailable === false) {
+    return false;
+  }
 
   try {
-    await readFile(settingsFile, "utf-8");
+    await mkdir(dataDir, { recursive: true });
+
+    try {
+      await readFile(settingsFile, "utf-8");
+    } catch {
+      await writeFile(
+        settingsFile,
+        JSON.stringify(buildDefaultPromptSettings(), null, 2),
+        "utf-8",
+      );
+    }
+
+    promptSettingsStorageAvailable = true;
+    return true;
   } catch {
-    await writeFile(
-      settingsFile,
-      JSON.stringify(buildDefaultPromptSettings(), null, 2),
-      "utf-8",
-    );
+    promptSettingsStorageAvailable = false;
+    return false;
   }
 }
 
 export async function readPromptSettings(): Promise<PromptSettings> {
-  await ensureSettingsFile();
+  const storageAvailable = await ensureSettingsFile();
+
+  if (!storageAvailable) {
+    return memoryPromptSettings ?? buildDefaultPromptSettings();
+  }
 
   try {
     const content = await readFile(settingsFile, "utf-8");
     const parsed = JSON.parse(content) as Partial<PromptSettings>;
     const fallback = buildDefaultPromptSettings();
 
-    return {
+    const normalized = {
       systemRole: normalizeText(parsed.systemRole, fallback.systemRole),
       lectureRequirements: normalizeText(parsed.lectureRequirements, fallback.lectureRequirements),
       exerciseRequirements: normalizeText(
@@ -74,12 +96,25 @@ export async function readPromptSettings(): Promise<PromptSettings> {
       extraInstructions: normalizeText(parsed.extraInstructions, fallback.extraInstructions),
       updatedAt: normalizeText(parsed.updatedAt, fallback.updatedAt),
     };
+
+    memoryPromptSettings = normalized;
+    return normalized;
   } catch {
-    return buildDefaultPromptSettings();
+    return memoryPromptSettings ?? buildDefaultPromptSettings();
   }
 }
 
 export async function writePromptSettings(input: PromptSettings): Promise<void> {
-  await ensureSettingsFile();
-  await writeFile(settingsFile, JSON.stringify(input, null, 2), "utf-8");
+  memoryPromptSettings = input;
+
+  const storageAvailable = await ensureSettingsFile();
+  if (!storageAvailable) {
+    return;
+  }
+
+  try {
+    await writeFile(settingsFile, JSON.stringify(input, null, 2), "utf-8");
+  } catch {
+    promptSettingsStorageAvailable = false;
+  }
 }

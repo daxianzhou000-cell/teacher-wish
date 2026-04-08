@@ -2,8 +2,14 @@
 
 import type { FormEvent } from "react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import {
+  clearCachedPromptSettings,
+  readCachedPromptSettings,
+  writeCachedPromptSettings,
+} from "@/lib/client/prompt-settings-cache";
+import { shouldUseLocalPrimaryStorage } from "@/lib/client/storage-mode";
 import type { PromptSettings } from "@/lib/types/prompt-settings";
 
 const shellClassName =
@@ -51,7 +57,55 @@ export function PromptSettingsPage({ initialSettings }: { initialSettings: Promp
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
+
+    void readCachedPromptSettings().then((cachedSettings) => {
+      if (!cachedSettings || cancelled) {
+        return;
+      }
+
+      setSettings((current) =>
+        cachedSettings.updatedAt.localeCompare(current.updatedAt) > 0 ? cachedSettings : current,
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    void writeCachedPromptSettings(settings);
+  }, [settings]);
+
   async function save(payload: Partial<PromptSettings> & { resetToDefault?: boolean }) {
+    const useLocalPrimary = await shouldUseLocalPrimaryStorage();
+
+    if (useLocalPrimary) {
+      if (payload.resetToDefault) {
+        await clearCachedPromptSettings();
+        setSettings(initialSettings);
+        return initialSettings;
+      }
+
+      const next: PromptSettings = {
+        systemRole: payload.systemRole ?? settings.systemRole,
+        lectureRequirements: payload.lectureRequirements ?? settings.lectureRequirements,
+        exerciseRequirements: payload.exerciseRequirements ?? settings.exerciseRequirements,
+        homeworkRequirements: payload.homeworkRequirements ?? settings.homeworkRequirements,
+        parentFeedbackRequirements:
+          payload.parentFeedbackRequirements ?? settings.parentFeedbackRequirements,
+        outputRequirements: payload.outputRequirements ?? settings.outputRequirements,
+        extraInstructions: payload.extraInstructions ?? settings.extraInstructions,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setSettings(next);
+      await writeCachedPromptSettings(next);
+      return next;
+    }
+
     const response = await fetch("/api/settings/prompt", {
       method: "PATCH",
       headers: {

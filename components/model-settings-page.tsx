@@ -7,6 +7,7 @@ import {
   readCachedModelSettings,
   writeCachedModelSettings,
 } from "@/lib/client/model-settings-cache";
+import { shouldUseLocalPrimaryStorage } from "@/lib/client/storage-mode";
 import type {
   ApiKeySource,
   ConfigurableProviderName,
@@ -43,6 +44,215 @@ type ModelsPayload = {
   };
   error?: string;
 };
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+
+function buildModelListCandidates(baseUrl: string): string[] {
+  const normalized = normalizeBaseUrl(baseUrl);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const candidates = [`${normalized}/models`];
+
+  if (!/\/v\d+$/.test(normalized)) {
+    candidates.push(`${normalized}/v1/models`);
+  }
+
+  return Array.from(new Set(candidates));
+}
+
+function extractModelIds(payload: Record<string, unknown>): string[] {
+  const ids = new Set<string>();
+  const data = payload.data;
+  const models = payload.models;
+
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      if (
+        item &&
+        typeof item === "object" &&
+        typeof (item as { id?: unknown }).id === "string" &&
+        (item as { id: string }).id.trim()
+      ) {
+        ids.add((item as { id: string }).id.trim());
+      }
+    }
+  }
+
+  if (Array.isArray(models)) {
+    for (const item of models) {
+      if (typeof item === "string" && item.trim()) {
+        ids.add(item.trim());
+        continue;
+      }
+
+      if (item && typeof item === "object") {
+        const record = item as { id?: unknown; name?: unknown; model?: unknown };
+        const candidates = [record.id, record.name, record.model];
+
+        for (const candidate of candidates) {
+          if (typeof candidate === "string" && candidate.trim()) {
+            ids.add(candidate.trim());
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return Array.from(ids).sort((left, right) => left.localeCompare(right));
+}
+
+function validateModelSettings(
+  input: ModelSettings,
+  builtinPrimary: ModelConnectionSettings,
+): string | null {
+  const effectivePrimary = input.primaryMode === "builtin" ? builtinPrimary : input.primaryCustom;
+
+  if (
+    input.primaryMode === "builtin" &&
+    builtinPrimary.provider !== "mock" &&
+    (!builtinPrimary.model.trim() || !builtinPrimary.baseUrl.trim() || !builtinPrimary.apiKey.trim())
+  ) {
+    return "当前应用内置主模型还未配置完整，请先切换到用户自配主模型，或由部署者补齐默认主模型配置。";
+  }
+
+  if (
+    input.primaryMode === "custom" &&
+    effectivePrimary.enabled &&
+    effectivePrimary.provider !== "mock" &&
+    !effectivePrimary.model.trim()
+  ) {
+    return "主模型配置需要填写模型名称。";
+  }
+
+  if (
+    input.primaryMode === "custom" &&
+    effectivePrimary.enabled &&
+    effectivePrimary.provider === "mock" &&
+    (effectivePrimary.model.trim() ||
+      effectivePrimary.baseUrl.trim() ||
+      effectivePrimary.apiKey.trim())
+  ) {
+    return "你当前仍选择的是 mock。若要接真实模型，请把 Provider 改为 openai 或 custom，再填写模型名称、Base URL 和 API Key。";
+  }
+
+  if (
+    input.primaryMode === "custom" &&
+    effectivePrimary.enabled &&
+    effectivePrimary.provider !== "mock" &&
+    (!effectivePrimary.baseUrl.trim() || !effectivePrimary.apiKey.trim())
+  ) {
+    return "主模型配置需要填写 Base URL 和 API Key。";
+  }
+
+  if (input.backup.enabled && input.backup.provider !== "mock") {
+    if (
+      !input.backup.model.trim() ||
+      !input.backup.baseUrl.trim() ||
+      !input.backup.apiKey.trim()
+    ) {
+      return input.backup.apiKeySource === "builtin"
+        ? "备用模型当前选择的是应用内置 Key，但这套默认备用配置还不可用。请切换为用户自配，或由部署者补齐默认配置。"
+        : "备用模型已启用时，需要完整填写模型名称、Base URL 和 API Key。";
+    }
+  }
+
+  return null;
+}
+
+async function fetchModelsDirectly(connection: ModelConnectionSettings): Promise<string[]> {
+  if (connection.provider === "mock") {
+    throw new Error("mock 模式没有可拉取的真实模型列表，请先切换到 openai 或 custom。");
+  }
+
+  const baseCandidates = buildModelListCandidates(connection.baseUrl);
+
+  if (!baseCandidates.length) {
+    throw new Error("请先填写 Base URL。");
+  }
+
+  if (!connection.apiKey.trim()) {
+    throw new Error("请先填写 API Key。");
+  }
+
+  let lastError = "当前平台没有返回可用模型列表。你仍然可以直接手动填写模型名。";
+
+  for (const candidateUrl of baseCandidates) {
+    try {
+      const response = await fetch(candidateUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${connection.apiKey.trim()}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const rawText = await response.text();
+      const payload = ((): Record<string, unknown> => {
+        try {
+          return JSON.parse(rawText) as Record<string, unknown>;
+        } catch {
+          return {};
+        }
+      })();
+
+      if (/<!doctype html>|<html/i.test(rawText)) {
+        lastError =
+          "当前地址返回的是平台网页而不是模型接口。请确认你填写的是 API 地址。";
+        continue;
+      }
+
+      if (!response.ok) {
+        lastError =
+          typeof (payload.error as { message?: string } | undefined)?.message === "string"
+            ? (payload.error as { message?: string }).message!
+            : "模型列表拉取失败，请检查 Base URL、API Key 或平台兼容性。";
+        continue;
+      }
+
+      const models = extractModelIds(payload);
+
+      if (!models.length) {
+        lastError = "已请求成功，但没有解析到可用模型列表。你可以直接手动填写模型名。";
+        continue;
+      }
+
+      return models;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "拉取模型列表失败。";
+    }
+  }
+
+  throw new Error(lastError);
+}
+
+async function shouldUseDirectModelList(
+  slotKey: "builtinPrimary" | "primaryCustom" | "backup",
+  connection: ModelConnectionSettings,
+): Promise<boolean> {
+  if (!(await shouldUseLocalPrimaryStorage())) {
+    return false;
+  }
+
+  if (slotKey === "builtinPrimary") {
+    return false;
+  }
+
+  if (connection.provider === "mock") {
+    return false;
+  }
+
+  if (connection.apiKeySource !== "custom") {
+    return false;
+  }
+
+  return Boolean(connection.apiKey.trim() && connection.baseUrl.trim());
+}
 
 function TinyCandy() {
   return (
@@ -333,8 +543,12 @@ export function ModelSettingsPage({
     primaryCustom: "",
     backup: "",
   });
+  const resolvedBuiltinPrimary: ModelConnectionSettings = {
+    ...builtinPrimary,
+    model: settings.builtinPrimaryModel.trim() || builtinPrimary.model,
+  };
   const effectivePrimary =
-    settings.primaryMode === "builtin" ? builtinPrimary : settings.primaryCustom;
+    settings.primaryMode === "builtin" ? resolvedBuiltinPrimary : settings.primaryCustom;
   const effectivePrimaryLabel =
     settings.primaryMode === "builtin" ? "应用内置主模型" : "用户自配主模型";
 
@@ -363,7 +577,7 @@ export function ModelSettingsPage({
   async function handleLoadModels(slotKey: "builtinPrimary" | "primaryCustom" | "backup") {
     const connection =
       slotKey === "builtinPrimary"
-        ? builtinPrimary
+        ? resolvedBuiltinPrimary
         : slotKey === "primaryCustom"
           ? settings.primaryCustom
           : settings.backup;
@@ -372,6 +586,13 @@ export function ModelSettingsPage({
     setLoadingModels((current) => ({ ...current, [slotKey]: true }));
 
     try {
+      if (await shouldUseDirectModelList(slotKey, connection)) {
+        const models = await fetchModelsDirectly(connection);
+        setAvailableModels((current) => ({ ...current, [slotKey]: models }));
+        setMessage(`已直连拉取 ${models.length} 个可用模型。`);
+        return;
+      }
+
       const response = await fetch("/api/settings/model/models", {
         method: "POST",
         headers: {
@@ -394,10 +615,26 @@ export function ModelSettingsPage({
       setAvailableModels((current) => ({ ...current, [slotKey]: payload.data?.models ?? [] }));
       setMessage(`已拉取 ${payload.data.models.length} 个可用模型。`);
     } catch (loadError) {
-      setModelsError((current) => ({
-        ...current,
-        [slotKey]: loadError instanceof Error ? loadError.message : "拉取模型列表失败。",
-      }));
+      const canTryDirect = await shouldUseDirectModelList(slotKey, connection);
+
+      if (!canTryDirect) {
+        setModelsError((current) => ({
+          ...current,
+          [slotKey]: loadError instanceof Error ? loadError.message : "拉取模型列表失败。",
+        }));
+        return;
+      }
+
+      try {
+        const models = await fetchModelsDirectly(connection);
+        setAvailableModels((current) => ({ ...current, [slotKey]: models }));
+        setMessage(`已直连拉取 ${models.length} 个可用模型。`);
+      } catch (directError) {
+        setModelsError((current) => ({
+          ...current,
+          [slotKey]: directError instanceof Error ? directError.message : "拉取模型列表失败。",
+        }));
+      }
     } finally {
       setLoadingModels((current) => ({ ...current, [slotKey]: false }));
     }
@@ -419,25 +656,42 @@ export function ModelSettingsPage({
           enabled: true,
         },
       };
+      const builtinPrimaryForValidation: ModelConnectionSettings = {
+        ...resolvedBuiltinPrimary,
+        model: payloadToSave.builtinPrimaryModel.trim() || builtinPrimary.model,
+      };
+      const validationError = validateModelSettings(payloadToSave, builtinPrimaryForValidation);
 
-      const response = await fetch("/api/settings/model", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payloadToSave),
-      });
-
-      const payload = (await response.json()) as ApiPayload;
-
-      if (!response.ok || !payload.data) {
-        throw new Error(payload.error || "保存模型设置失败。");
+      if (validationError) {
+        throw new Error(validationError);
       }
 
-      setSettings(payload.data);
-      void writeCachedModelSettings(payload.data);
+      const useLocalPrimary = await shouldUseLocalPrimaryStorage();
+
+      if (useLocalPrimary) {
+        setSettings(payloadToSave);
+        await writeCachedModelSettings(payloadToSave);
+      } else {
+        const response = await fetch("/api/settings/model", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payloadToSave),
+        });
+
+        const payload = (await response.json()) as ApiPayload;
+
+        if (!response.ok || !payload.data) {
+          throw new Error(payload.error || "保存模型设置失败。");
+        }
+
+        setSettings(payload.data);
+        await writeCachedModelSettings(payload.data);
+      }
+
       setMessage(
-        payload.data.primaryMode === "builtin"
+        payloadToSave.primaryMode === "builtin"
           ? "已保存。当前默认走应用内置主模型。"
           : "已保存。当前默认走用户自配主模型，配置会继续保留。",
       );
@@ -537,11 +791,11 @@ export function ModelSettingsPage({
               </div>
               <div className="rounded-[18px] border border-white/85 bg-[rgba(255,255,255,0.74)] px-4 py-3 text-sm text-[#5E554D]">
                 <p className="font-semibold text-[#6B5745]">当前内置生效模型</p>
-                <p className="mt-2">{builtinPrimary.model || "未配置"}</p>
+                <p className="mt-2">{resolvedBuiltinPrimary.model || "未配置"}</p>
               </div>
               <div className="md:col-span-2 rounded-[18px] border border-white/85 bg-[rgba(255,255,255,0.74)] px-4 py-3 text-sm text-[#5E554D]">
                 <p className="font-semibold text-[#6B5745]">Base URL</p>
-                <p className="mt-2 break-all">{builtinPrimary.baseUrl || "未配置"}</p>
+                <p className="mt-2 break-all">{resolvedBuiltinPrimary.baseUrl || "未配置"}</p>
               </div>
               <label className="md:col-span-2 flex flex-col gap-2 text-sm font-semibold text-[#6B5745]">
                 <span>使用的内置模型</span>
