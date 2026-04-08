@@ -60,6 +60,11 @@ export async function PATCH(request: Request) {
 
     const next: ModelSettings = {
       primaryMode,
+      builtinPrimaryPresetId:
+        typeof body.builtinPrimaryPresetId === "string" &&
+        body.builtinPrimaryPresetId.trim()
+          ? body.builtinPrimaryPresetId.trim()
+          : current.builtinPrimaryPresetId,
       builtinPrimaryModel:
         typeof body.builtinPrimaryModel === "string"
           ? body.builtinPrimaryModel.trim()
@@ -71,7 +76,10 @@ export async function PATCH(request: Request) {
       updatedAt: new Date().toISOString(),
     };
     const effective = resolveModelSettings(next, { includeRuntimeCache: false });
-    const builtinPrimary = getBuiltinPrimaryConnection(next.builtinPrimaryModel);
+    const builtinPrimary = getBuiltinPrimaryConnection(
+      next.builtinPrimaryPresetId,
+      next.builtinPrimaryModel,
+    );
 
     if (
       primaryMode === "builtin" &&

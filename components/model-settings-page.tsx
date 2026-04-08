@@ -10,6 +10,7 @@ import {
 import { shouldUseLocalPrimaryStorage } from "@/lib/client/storage-mode";
 import type {
   ApiKeySource,
+  BuiltinModelPreset,
   ConfigurableProviderName,
   ModelConnectionSettings,
   ModelSettings,
@@ -517,14 +518,17 @@ function EditableConnectionForm({
 
 export function ModelSettingsPage({
   initialSettings,
-  builtinPrimary,
+  builtinPrimaryConnections,
+  builtinPrimaryPresets,
   builtinApiKeyAvailability,
 }: {
   initialSettings: ModelSettings;
-  builtinPrimary: ModelConnectionSettings;
+  builtinPrimaryConnections: Partial<Record<string, ModelConnectionSettings>>;
+  builtinPrimaryPresets: BuiltinModelPreset[];
   builtinApiKeyAvailability: Record<"openai" | "custom", boolean>;
 }) {
   const [settings, setSettings] = useState(initialSettings);
+  const [cacheReady, setCacheReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -543,10 +547,24 @@ export function ModelSettingsPage({
     primaryCustom: "",
     backup: "",
   });
+  const activeBuiltinPrimary =
+    builtinPrimaryConnections[settings.builtinPrimaryPresetId] ??
+    builtinPrimaryConnections[builtinPrimaryPresets[0]?.id || ""] ?? {
+      provider: "custom",
+      model: "",
+      baseUrl: "",
+      apiKey: "",
+      apiKeySource: "builtin",
+      enabled: true,
+    };
   const resolvedBuiltinPrimary: ModelConnectionSettings = {
-    ...builtinPrimary,
-    model: settings.builtinPrimaryModel.trim() || builtinPrimary.model,
+    ...activeBuiltinPrimary,
+    model: settings.builtinPrimaryModel.trim() || activeBuiltinPrimary.model,
   };
+  const activeBuiltinPreset =
+    builtinPrimaryPresets.find((preset) => preset.id === settings.builtinPrimaryPresetId) ??
+    builtinPrimaryPresets[0] ??
+    null;
   const effectivePrimary =
     settings.primaryMode === "builtin" ? resolvedBuiltinPrimary : settings.primaryCustom;
   const effectivePrimaryLabel =
@@ -556,23 +574,36 @@ export function ModelSettingsPage({
     let cancelled = false;
 
     void readCachedModelSettings().then((cachedSettings) => {
-      if (!cachedSettings || cancelled) {
+      if (cancelled) {
         return;
       }
 
-      setSettings((current) =>
-        cachedSettings.updatedAt.localeCompare(current.updatedAt) > 0 ? cachedSettings : current,
-      );
+      if (cachedSettings) {
+        setSettings((current) => ({
+          ...cachedSettings,
+          builtinPrimaryPresetId: builtinPrimaryPresets.some(
+            (preset) => preset.id === cachedSettings.builtinPrimaryPresetId,
+          )
+            ? cachedSettings.builtinPrimaryPresetId
+            : current.builtinPrimaryPresetId,
+        }));
+      }
+
+      setCacheReady(true);
     });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [builtinPrimaryPresets]);
 
   useEffect(() => {
+    if (!cacheReady) {
+      return;
+    }
+
     void writeCachedModelSettings(settings);
-  }, [settings]);
+  }, [cacheReady, settings]);
 
   async function handleLoadModels(slotKey: "builtinPrimary" | "primaryCustom" | "backup") {
     const connection =
@@ -603,6 +634,8 @@ export function ModelSettingsPage({
           baseUrl: connection.baseUrl,
           apiKey: connection.apiKey,
           apiKeySource: slotKey === "builtinPrimary" ? "builtin" : connection.apiKeySource,
+          builtinPrimaryPresetId:
+            slotKey === "builtinPrimary" ? settings.builtinPrimaryPresetId : undefined,
         }),
       });
 
@@ -649,7 +682,9 @@ export function ModelSettingsPage({
     try {
       const payloadToSave: ModelSettings = {
         ...settings,
+        builtinPrimaryPresetId: settings.builtinPrimaryPresetId,
         builtinPrimaryModel: settings.builtinPrimaryModel.trim(),
+        updatedAt: new Date().toISOString(),
         primaryCustom: {
           ...settings.primaryCustom,
           apiKeySource: "custom",
@@ -658,7 +693,7 @@ export function ModelSettingsPage({
       };
       const builtinPrimaryForValidation: ModelConnectionSettings = {
         ...resolvedBuiltinPrimary,
-        model: payloadToSave.builtinPrimaryModel.trim() || builtinPrimary.model,
+        model: payloadToSave.builtinPrimaryModel.trim() || activeBuiltinPrimary.model,
       };
       const validationError = validateModelSettings(payloadToSave, builtinPrimaryForValidation);
 
@@ -745,7 +780,7 @@ export function ModelSettingsPage({
                 当前主来源：{effectivePrimaryLabel}
               </span>
               <span className="rounded-full border border-white/88 bg-white/76 px-4 py-2 font-semibold text-[#6C6056]">
-                应用内置平台：{builtinPrimary.provider}
+                应用内置平台：{activeBuiltinPreset?.label || "未配置"}
               </span>
               <span className="rounded-full border border-white/88 bg-white/76 px-4 py-2 font-semibold text-[#6C6056]">
                 内置模型覆盖：{settings.builtinPrimaryModel || "未覆盖，使用默认"}
@@ -787,12 +822,37 @@ export function ModelSettingsPage({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-[18px] border border-white/85 bg-[rgba(255,255,255,0.74)] px-4 py-3 text-sm text-[#5E554D]">
                 <p className="font-semibold text-[#6B5745]">Provider</p>
-                <p className="mt-2">{builtinPrimary.provider}</p>
+                <p className="mt-2">{resolvedBuiltinPrimary.provider}</p>
               </div>
               <div className="rounded-[18px] border border-white/85 bg-[rgba(255,255,255,0.74)] px-4 py-3 text-sm text-[#5E554D]">
                 <p className="font-semibold text-[#6B5745]">当前内置生效模型</p>
                 <p className="mt-2">{resolvedBuiltinPrimary.model || "未配置"}</p>
               </div>
+              <label className="md:col-span-2 flex flex-col gap-2 text-sm font-semibold text-[#6B5745]">
+                <span>应用内置平台</span>
+                <select
+                  value={settings.builtinPrimaryPresetId}
+                  onChange={(event) => {
+                    const nextPresetId = event.target.value;
+                    setSettings((current) => ({
+                      ...current,
+                      builtinPrimaryPresetId: nextPresetId,
+                    }));
+                    setAvailableModels((current) => ({ ...current, builtinPrimary: [] }));
+                    setModelsError((current) => ({ ...current, builtinPrimary: "" }));
+                  }}
+                  className={fieldClassName}
+                >
+                  {builtinPrimaryPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs font-normal leading-6 text-[#8F8275]">
+                  切换内置平台后，会继续使用该平台对应的应用内置 Key、Provider 和默认 Base URL。
+                </p>
+              </label>
               <div className="md:col-span-2 rounded-[18px] border border-white/85 bg-[rgba(255,255,255,0.74)] px-4 py-3 text-sm text-[#5E554D]">
                 <p className="font-semibold text-[#6B5745]">Base URL</p>
                 <p className="mt-2 break-all">{resolvedBuiltinPrimary.baseUrl || "未配置"}</p>
@@ -808,7 +868,7 @@ export function ModelSettingsPage({
                     }))
                   }
                   className={fieldClassName}
-                  placeholder={builtinPrimary.model || "默认使用应用内置模型"}
+                  placeholder={activeBuiltinPrimary.model || "默认使用应用内置模型"}
                 />
                 <p className="text-xs font-normal leading-6 text-[#8F8275]">
                   不填就走应用默认模型；填写后，会继续沿用同一平台和内置 Key，只覆盖模型名。

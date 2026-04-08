@@ -161,6 +161,46 @@ function normalizeUnicodeOperators(value: string): string {
     .replaceAll("△", "\\triangle ");
 }
 
+function normalizeImplicitSubscripts(value: string): string {
+  return value.replace(
+    /(^|[^\\A-Za-z])([A-Za-z])([0-9]+)(?=$|[^0-9.])/g,
+    (_, prefix: string, variable: string, script: string) =>
+      `${prefix}${variable}_{${script}}`,
+  );
+}
+
+function normalizeUnicodeScripts(value: string): string {
+  return value
+    .replaceAll("⁰", "^{0}")
+    .replaceAll("¹", "^{1}")
+    .replaceAll("²", "^{2}")
+    .replaceAll("³", "^{3}")
+    .replaceAll("⁴", "^{4}")
+    .replaceAll("⁵", "^{5}")
+    .replaceAll("⁶", "^{6}")
+    .replaceAll("⁷", "^{7}")
+    .replaceAll("⁸", "^{8}")
+    .replaceAll("⁹", "^{9}")
+    .replaceAll("₀", "_{0}")
+    .replaceAll("₁", "_{1}")
+    .replaceAll("₂", "_{2}")
+    .replaceAll("₃", "_{3}")
+    .replaceAll("₄", "_{4}")
+    .replaceAll("₅", "_{5}")
+    .replaceAll("₆", "_{6}")
+    .replaceAll("₇", "_{7}")
+    .replaceAll("₈", "_{8}")
+    .replaceAll("₉", "_{9}");
+}
+
+function normalizeGeometryPointLabels(value: string): string {
+  return value.replace(
+    /(^|[^\\A-Za-z])([A-Z]{1,2})([0-9]+)(?=$|[^0-9.])/g,
+    (_, prefix: string, point: string, script: string) =>
+      `${prefix}${point}_{${script}}`,
+  );
+}
+
 function escapeHtmlRaw(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -170,7 +210,13 @@ function escapeHtmlRaw(value: string): string {
 }
 
 function normalizeBareLatex(value: string): string {
-  return normalizeUnicodeOperators(normalizeEquationSystems(normalizeUnicodeRoots(value)))
+  return normalizeGeometryPointLabels(
+    normalizeImplicitSubscripts(
+      normalizeUnicodeScripts(
+        normalizeUnicodeOperators(normalizeEquationSystems(normalizeUnicodeRoots(value))),
+      ),
+    ),
+  )
     .replace(
       /(\([^)]+\)|\[[^\]]+\]|[A-Za-z0-9.+\-]+)\s*\/\s*(\([^)]+\)|\[[^\]]+\]|[A-Za-z0-9.+\-]+)/g,
       (_, rawNumerator: string, rawDenominator: string) => {

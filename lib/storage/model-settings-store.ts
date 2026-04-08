@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type {
   ApiKeySource,
+  BuiltinModelPreset,
   ConfigurableProviderName,
   ModelConnectionSettings,
   ModelSettings,
@@ -148,9 +149,160 @@ export function getBuiltinApiKey(provider: ConfigurableProviderName): string {
   return getEnvApiKey(provider);
 }
 
+function normalizeBuiltinPresetId(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+}
+
+function parseBuiltinPreset(raw: unknown, index: number): BuiltinModelPreset | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const provider = isProvider(record.provider) ? record.provider : null;
+
+  if (!provider || provider === "mock") {
+    return null;
+  }
+
+  const rawId =
+    typeof record.id === "string" && record.id.trim()
+      ? record.id.trim()
+      : typeof record.label === "string" && record.label.trim()
+        ? record.label.trim()
+        : `builtin-${provider}-${index + 1}`;
+  const apiKeyEnv =
+    typeof record.apiKeyEnv === "string" && record.apiKeyEnv.trim()
+      ? record.apiKeyEnv.trim()
+      : provider === "openai"
+        ? "OPENAI_API_KEY"
+        : "CUSTOM_API_KEY";
+
+  return {
+    id: normalizeBuiltinPresetId(rawId),
+    label:
+      typeof record.label === "string" && record.label.trim()
+        ? record.label.trim()
+        : rawId,
+    provider,
+    model:
+      typeof record.model === "string" && record.model.trim()
+        ? record.model.trim()
+        : provider === "openai"
+          ? builtinPrimaryDefaults.openaiModel
+          : builtinPrimaryDefaults.customModel,
+    baseUrl:
+      typeof record.baseUrl === "string" && record.baseUrl.trim()
+        ? record.baseUrl.trim()
+        : provider === "openai"
+          ? builtinPrimaryDefaults.openaiBaseUrl
+          : builtinPrimaryDefaults.customBaseUrl,
+    apiKeyEnv,
+  };
+}
+
+function getLegacyBuiltinPresets(): BuiltinModelPreset[] {
+  const presets: BuiltinModelPreset[] = [];
+
+  if (getEnvApiKey("custom")) {
+    presets.push({
+      id: "builtin-custom",
+      label: getRuntimeEnvValue("BUILTIN_CUSTOM_LABEL") || "应用内置平台",
+      provider: "custom",
+      model: getRuntimeEnvValue("CUSTOM_MODEL") || builtinPrimaryDefaults.customModel,
+      baseUrl: getRuntimeEnvValue("CUSTOM_BASE_URL") || builtinPrimaryDefaults.customBaseUrl,
+      apiKeyEnv: "CUSTOM_API_KEY",
+    });
+  }
+
+  if (getEnvApiKey("openai")) {
+    presets.push({
+      id: "builtin-openai",
+      label: getRuntimeEnvValue("BUILTIN_OPENAI_LABEL") || "OpenAI",
+      provider: "openai",
+      model: getRuntimeEnvValue("OPENAI_MODEL") || builtinPrimaryDefaults.openaiModel,
+      baseUrl: getRuntimeEnvValue("OPENAI_BASE_URL") || builtinPrimaryDefaults.openaiBaseUrl,
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+  }
+
+  return presets;
+}
+
+export function getBuiltinPrimaryPresets(): BuiltinModelPreset[] {
+  const raw = getRuntimeEnvValue("BUILTIN_MODEL_PRESETS");
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+
+      if (Array.isArray(parsed)) {
+        const presets = parsed
+          .map((item, index) => parseBuiltinPreset(item, index))
+          .filter((item): item is BuiltinModelPreset => Boolean(item))
+          .filter((preset) => Boolean(getRuntimeEnvValue(preset.apiKeyEnv)));
+
+        if (presets.length) {
+          return presets;
+        }
+      }
+    } catch {
+      // ignore invalid JSON and fall back to legacy env fields
+    }
+  }
+
+  const legacyPresets = getLegacyBuiltinPresets();
+
+  if (legacyPresets.length) {
+    return legacyPresets;
+  }
+
+  return [
+    {
+      id: "builtin-default-custom",
+      label: "应用内置平台",
+      provider: builtinPrimaryDefaults.provider,
+      model: builtinPrimaryDefaults.customModel,
+      baseUrl: builtinPrimaryDefaults.customBaseUrl,
+      apiKeyEnv: "CUSTOM_API_KEY",
+    },
+  ];
+}
+
+function getDefaultBuiltinPrimaryPresetId(): string {
+  const presets = getBuiltinPrimaryPresets();
+  const envProvider = getRuntimeEnvValue("MODEL_PROVIDER");
+
+  if (isProvider(envProvider)) {
+    const matchedByProvider = presets.find((preset) => preset.provider === envProvider);
+
+    if (matchedByProvider) {
+      return matchedByProvider.id;
+    }
+  }
+
+  return presets[0]?.id || "builtin-default-custom";
+}
+
+function getBuiltinPresetById(presetId?: string): BuiltinModelPreset | null {
+  const presets = getBuiltinPrimaryPresets();
+
+  if (!presetId) {
+    return presets[0] ?? null;
+  }
+
+  return (
+    presets.find((preset) => preset.id === presetId) ??
+    presets.find((preset) => preset.provider === presetId) ??
+    presets[0] ??
+    null
+  );
+}
+
 function defaultSettings(): ModelSettings {
   return {
     primaryMode: "builtin",
+    builtinPrimaryPresetId: getDefaultBuiltinPrimaryPresetId(),
     builtinPrimaryModel: "",
     primaryCustom: {
       provider: "custom",
@@ -170,15 +322,21 @@ export function getDefaultModelSettings(): ModelSettings {
   return defaultSettings();
 }
 
-export function getBuiltinPrimaryConnection(modelOverride?: string): ModelConnectionSettings {
-  const envProvider = getRuntimeEnvValue("MODEL_PROVIDER");
-  const primaryProvider = isProvider(envProvider) ? envProvider : builtinPrimaryDefaults.provider;
+export function getBuiltinPrimaryConnection(
+  presetId?: string,
+  modelOverride?: string,
+): ModelConnectionSettings {
+  const preset = getBuiltinPresetById(presetId);
+  const primaryProvider = preset?.provider ?? builtinPrimaryDefaults.provider;
   const builtin = buildDefaultConnection(primaryProvider, true);
-  const builtinApiKey = getBuiltinApiKey(primaryProvider);
+  const builtinApiKey = getRuntimeEnvValue(
+    preset?.apiKeyEnv || (primaryProvider === "openai" ? "OPENAI_API_KEY" : "CUSTOM_API_KEY"),
+  );
 
   return {
     ...builtin,
-    model: modelOverride?.trim() || builtin.model,
+    model: modelOverride?.trim() || preset?.model || builtin.model,
+    baseUrl: preset?.baseUrl || builtin.baseUrl,
     apiKey: builtinApiKey,
     apiKeySource: "builtin",
     enabled: true,
@@ -246,7 +404,10 @@ export function resolveModelSettings(
   options?: { includeRuntimeCache?: boolean },
 ): ResolvedModelSettings {
   const includeRuntimeCache = options?.includeRuntimeCache ?? true;
-  const builtinPrimary = getBuiltinPrimaryConnection(input.builtinPrimaryModel);
+  const builtinPrimary = getBuiltinPrimaryConnection(
+    input.builtinPrimaryPresetId,
+    input.builtinPrimaryModel,
+  );
   const primaryCustomApiKey =
     input.primaryCustom.apiKeySource === "builtin"
       ? getEnvApiKey(input.primaryCustom.provider)
@@ -320,6 +481,12 @@ export async function readModelSettings(): Promise<ModelSettings> {
     );
     const parsedPrimaryCustom = normalizeConnection(parsed.primaryCustom, legacyPrimary);
     const parsedBackup = normalizeConnection(parsed.backup, fallback.backup);
+    const builtinPrimaryPresetIdValue = (parsed as Record<string, unknown>).builtinPrimaryPresetId;
+    const builtinPrimaryProviderValue = (parsed as Record<string, unknown>).builtinPrimaryProvider;
+    const parsedBuiltinPrimaryPresetId =
+      typeof builtinPrimaryPresetIdValue === "string" ? builtinPrimaryPresetIdValue.trim() : "";
+    const parsedBuiltinPrimaryProvider =
+      typeof builtinPrimaryProviderValue === "string" ? builtinPrimaryProviderValue.trim() : "";
     const primaryMode: PrimaryModelMode =
       parsed.primaryMode === "custom" || parsed.primaryMode === "builtin"
         ? parsed.primaryMode
@@ -345,6 +512,12 @@ export async function readModelSettings(): Promise<ModelSettings> {
 
     const normalized: ModelSettings = {
       primaryMode,
+      builtinPrimaryPresetId: parsedBuiltinPrimaryPresetId
+        ? parsedBuiltinPrimaryPresetId
+        : parsedBuiltinPrimaryProvider
+          ? (getBuiltinPresetById(parsedBuiltinPrimaryProvider)?.id ??
+            fallback.builtinPrimaryPresetId)
+          : fallback.builtinPrimaryPresetId,
       builtinPrimaryModel:
         typeof parsed.builtinPrimaryModel === "string" ? parsed.builtinPrimaryModel.trim() : "",
       primaryCustom: sanitizeConnectionForStorage(parsedPrimaryCustom),

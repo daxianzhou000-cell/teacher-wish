@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getBuiltinApiKey } from "@/lib/storage/model-settings-store";
+import {
+  getBuiltinApiKey,
+  getBuiltinPrimaryConnection,
+} from "@/lib/storage/model-settings-store";
 import type { ApiKeySource, ConfigurableProviderName } from "@/lib/types/model-settings";
 
 function isProvider(value: unknown): value is ConfigurableProviderName {
@@ -76,17 +79,27 @@ export async function POST(request: Request) {
       baseUrl?: unknown;
       apiKey?: unknown;
       apiKeySource?: unknown;
+      builtinPrimaryPresetId?: unknown;
     };
 
     const provider = isProvider(body.provider) ? body.provider : "mock";
-    const rawBaseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
     const apiKeySource: ApiKeySource =
       body.apiKeySource === "builtin" || body.apiKeySource === "custom"
         ? body.apiKeySource
         : "custom";
+    const builtinPrimaryPresetId =
+      typeof body.builtinPrimaryPresetId === "string" ? body.builtinPrimaryPresetId.trim() : "";
+    const builtinPrimaryConnection =
+      apiKeySource === "builtin" && builtinPrimaryPresetId
+        ? getBuiltinPrimaryConnection(builtinPrimaryPresetId)
+        : null;
+    const rawBaseUrl =
+      typeof body.baseUrl === "string" && body.baseUrl.trim()
+        ? body.baseUrl.trim()
+        : builtinPrimaryConnection?.baseUrl || "";
     const apiKey =
       apiKeySource === "builtin"
-        ? getBuiltinApiKey(provider)
+        ? builtinPrimaryConnection?.apiKey || getBuiltinApiKey(provider)
         : typeof body.apiKey === "string"
           ? body.apiKey.trim()
           : "";

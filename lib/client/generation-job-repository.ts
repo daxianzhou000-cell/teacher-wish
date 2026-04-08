@@ -32,6 +32,8 @@ export type ClientGenerationJob = {
   error?: string;
 };
 
+const ACTIVE_CACHE_STALE_AFTER_MS = 5 * 1000;
+
 function normalizeJobPayload(
   payload: Partial<ClientGenerationJob> & ErrorPayload,
   fallbackJobId?: string,
@@ -94,6 +96,10 @@ function buildDirectGenerationAttempts(settings: ModelSettings | null): ModelCon
   }
 
   return attempts;
+}
+
+function isBuiltinPrimarySelected(settings: ModelSettings | null): boolean {
+  return settings?.primaryMode === "builtin";
 }
 
 async function generateDirectly(
@@ -181,6 +187,10 @@ async function shouldUseDirectGeneration(modelSettings: ModelSettings | null): P
     return false;
   }
 
+  if (isBuiltinPrimarySelected(modelSettings)) {
+    return false;
+  }
+
   return buildDirectGenerationAttempts(modelSettings).length > 0;
 }
 
@@ -239,7 +249,7 @@ export async function createGenerationJob(
       input,
     };
   } catch (error) {
-    if (await shouldUseLocalPrimaryStorage()) {
+    if ((await shouldUseLocalPrimaryStorage()) && !isBuiltinPrimarySelected(modelSettings)) {
       return createLocalGenerationJob(input, modelSettings);
     }
 
@@ -250,10 +260,10 @@ export async function createGenerationJob(
 export async function fetchGenerationJob(
   jobId: string,
 ): Promise<ClientGenerationJob> {
-  if (await shouldUseLocalPrimaryStorage()) {
-    const cached = await readCachedGenerationJob(jobId);
+  const cached = await readCachedGenerationJob(jobId);
 
-    if (cached) {
+  if (await shouldUseLocalPrimaryStorage()) {
+    if (cached && (cached.status === "completed" || cached.status === "failed")) {
       return cached;
     }
   }
@@ -265,10 +275,17 @@ export async function fetchGenerationJob(
 
     return parseJobResponse(response, jobId);
   } catch (error) {
-    const cached = await readCachedGenerationJob(jobId);
-
     if (cached) {
-      return cached;
+      if (
+        (cached.status === "pending" || cached.status === "running") &&
+        Date.now() - new Date(cached.updatedAt).getTime() > ACTIVE_CACHE_STALE_AFTER_MS
+      ) {
+        throw new Error("任务在等待期间中断了，请重新发起生成。");
+      }
+
+      if (cached.status === "completed" || cached.status === "failed") {
+        return cached;
+      }
     }
 
     throw error;
