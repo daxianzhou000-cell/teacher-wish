@@ -74,7 +74,15 @@ export function EntranceGate() {
     }, 520);
   }
 
-  if (!checked || !open) {
+  if (!checked) {
+    if (!isHomePage) {
+      return null;
+    }
+
+    return <div className="fixed inset-0 z-[100] bg-[#fbfaf5]" aria-hidden="true" />;
+  }
+
+  if (!open) {
     return null;
   }
 
