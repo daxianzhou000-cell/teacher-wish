@@ -45,21 +45,40 @@ function buildSuggestionFallback(
   const previousTopic = followUpContext.previousTopic.trim();
   const weakContent = followUpContext.weakContent.trim();
   const masteredContent = followUpContext.masteredContent.trim();
+  const teacherRemark = followUpContext.teacherRemark.trim();
+  const rawIssue = weakContent || teacherRemark;
+  const mentionsCalculation = /计算|运算|代入|抄写|符号|粗心|公式/i.test(rawIssue);
+  const mentionsFormula = /公式|判别式|因式分解|配方|平方差|完全平方/i.test(rawIssue);
+  const issueLabel =
+    rawIssue || `“${previousTopic}”里暴露出的具体薄弱点`;
 
   return {
-    goal: `围绕“${topic}”完成下一轮针对性补习，在延续“${previousTopic}”基础上稳住核心方法并推进新训练。`,
+    goal: `围绕“${topic}”完成下一轮针对性补习，优先解决${issueLabel}，让学生能独立完成同类基础题。`,
     continueFocus: [
-      masteredContent || `延续上一节“${previousTopic}”中已经建立的基础理解`,
-      "保留上一节已经能完成的基础步骤和审题顺序",
+      masteredContent || `延续上一节“${previousTopic}”中已经能独立完成的基础题型`,
+      mentionsFormula
+        ? "继续保留公式识别和选用顺序，先判断用哪种方法，再开始计算"
+        : "继续保留上一节已经建立的审题顺序和基础解题步骤",
     ],
     weakPointFocus: [
-      weakContent || `继续补强“${previousTopic}”中暴露出的薄弱环节`,
-      `把“${topic}”中的关键易错点拆开讲透并反复练习`,
+      mentionsCalculation
+        ? "先单练 3-5 题代入与化简，重点盯住符号、括号、分子分母抄写和计算顺序"
+        : weakContent || `继续补强“${previousTopic}”中暴露出的具体薄弱环节`,
+      mentionsFormula
+        ? `把“${topic}”里涉及公式选用、条件判断和代入计算的关键易错点拆开练`
+        : `把“${topic}”中的关键易错点拆开讲透并反复练习`,
     ],
     teachingStrategy: [
-      "先做短诊断，再决定本节讲义展开深度",
-      "先补弱再做变式，避免一开始进入综合题",
-      "每个关键点都配一题讲解和一题即时练习",
+      mentionsCalculation
+        ? "开头先用 5 分钟做 3 题纯计算诊断，不讲新题，先找学生到底卡在代入、符号还是化简"
+        : "开头先用 5 分钟做短诊断，确认学生这次具体卡点再决定展开深度",
+      mentionsFormula
+        ? "先练公式判断和代入，再做完整题，避免一上来就做综合题导致再次算乱"
+        : "先补最弱的基础环节，再做一题同型巩固，最后再加一题轻变式",
+      "每个关键点都按“老师示范 1 题 + 学生当堂做 1 题 + 立即订正 1 题”推进",
+      mentionsCalculation
+        ? "结尾留 5 分钟把本节做错的计算题重新独立算一遍，要求学生自己说出错在第几步"
+        : "结尾留 5 分钟做错题回看，要求学生复述方法和易错点",
     ],
   };
 }

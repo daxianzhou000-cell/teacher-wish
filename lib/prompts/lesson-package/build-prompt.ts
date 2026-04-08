@@ -87,10 +87,12 @@ function buildJsonFieldContract(input: GenerateRequest) {
       "你必须只输出一个 JSON 对象，不要输出 Markdown 标题、说明文字或额外包装。",
       "顶层字段只能包含：nextLessonSuggestion, lessonPackage。",
       "nextLessonSuggestion 字段要求如下：",
-      "- goal：一句话说明下一课最核心的补习目标。",
-      "- continueFocus：2-4 条，表示下一课需要继续保持或延续巩固的内容。",
-      "- weakPointFocus：2-4 条，表示下一课重点补弱的内容。",
-      "- teachingStrategy：3-5 条，表示下一课课堂安排与讲练策略。",
+      "- goal：一句话说明下一课最核心的补习目标，必须直接回应老师反馈里暴露的问题，不能只重复当前主题。",
+      "- continueFocus：2-4 条，表示下一课需要继续保持或延续巩固的内容；必须写到具体方法、具体题型或具体步骤，不能写“继续巩固基础”“保持节奏”这类空话。",
+      "- weakPointFocus：2-4 条，表示下一课重点补弱的内容；必须点出学生具体卡点，例如“去括号后合并同类项慢”“平方差识别不稳”“判别式代入易漏负号”“公式法分子分母抄写混乱”。",
+      "- teachingStrategy：3-5 条，表示下一课课堂安排与讲练策略；每条都必须包含实际动作或安排，例如“先做 3 题纯计算诊断”“先练公式代入再做判别式判断”“安排 8 分钟错题重算”“每道题讲后马上跟 1 道同型题”。",
+      "- 禁止写泛泛表述，例如“继续围绕同一知识点训练”“先稳住基础再逐步提升”“保持讲练结合节奏”“重点加强易错点复盘”。",
+      "- 必须优先吸收老师备注、薄弱内容、已掌握内容；如果老师明确说“计算不过关”，那建议里必须出现具体计算补救办法，而不是只写“加强计算能力”。",
       ...lessonPackageFieldContract,
       "topic 仍然是本次生成主目标，previousTopic 只作为上一节上下文，不得覆盖当前主题。",
       "如果你无法完全满足，也必须优先保证 nextLessonSuggestion、examples、classExercises、homework、answerAnalysis 这几部分完整可用。",
@@ -121,6 +123,7 @@ function buildFollowUpContext(input: GenerateRequest) {
     `- 薄弱内容：${context.weakContent || "未填写"}`,
     `- 老师备注：${context.teacherRemark || "未填写"}`,
     "注意：topic 仍然是这一次要生成的主目标；previousTopic 只用于描述上一节基础，不得替代当前 topic。",
+    "如果老师备注或薄弱内容中已经指出了具体问题，你必须在 nextLessonSuggestion 里逐条回应，不能改写成空泛鸡汤。",
   ].join("\n");
 }
 
@@ -138,6 +141,7 @@ function buildFollowUpStrengthRules(input: GenerateRequest) {
       : masteryLevel === "基本掌握"
         ? "本次资料包必须保持讲义、巩固和迁移训练的均衡，不要只重复基础，也不要过早拔高。"
         : "本次资料包应适度压缩基础讲义，增加迁移、变式和前推内容，但仍要保留必要的易错点提醒。",
+    "follow_up 模式下，nextLessonSuggestion 必须体现“下一课怎么上”：先诊断什么、先练哪一类题、怎么安排讲练顺序、最后如何收尾检查。",
   ].join("\n");
 }
 

@@ -13,12 +13,14 @@ function looksLikeMathSegment(value: string): boolean {
     return false;
   }
 
-  return /\\[A-Za-z]+|[A-Za-z][0-9]?|[=+\-*/^()[\]{}<>≤≥≠≈∥⊥∈√∛∜|]/.test(compact);
+  return /\\[A-Za-z]+|[A-Za-z](?:_[A-Za-z0-9]+|[0-9])?|[=+\-*/^_()[\]{}<>≤≥≠≈∥⊥∈√∛∜|]/.test(
+    compact,
+  );
 }
 
 function splitImplicitMathSegments(value: string): MathToken[] {
   const pattern =
-    /([A-Za-z0-9\\{}[\]()+\-*/=.^|<>≤≥≠≈∥⊥∈√∛∜]+(?:\s+[A-Za-z0-9\\{}[\]()+\-*/=.^|<>≤≥≠≈∥⊥∈√∛∜]+)*)/g;
+    /([A-Za-z0-9\\{}[\]()+\-*/=.^_|,<>≤≥≠≈∥⊥∈√∛∜]+(?:\s+[A-Za-z0-9\\{}[\]()+\-*/=.^_|,<>≤≥≠≈∥⊥∈√∛∜]+)*)/g;
   const tokens: MathToken[] = [];
   let lastIndex = 0;
 
@@ -227,6 +229,23 @@ function normalizeBareLatex(value: string): string {
     )
     .replace(/\\sqrt\s*\[([^\]]+)\]\s*([A-Za-z0-9])/g, "\\sqrt[$1]{$2}")
     .replace(/\\sqrt(?!\s*\[)(?!\s*\{)\s*([A-Za-z0-9])/g, "\\sqrt{$1}")
+    .replace(
+      /(^|[^$\\])((?:[A-Za-z](?:_[A-Za-z0-9]+|\^\{[^{}]+\})?|[0-9()+\-*/=,^_{}[\]\\±√∛∜]|\\[A-Za-z]+)+)/g,
+      (matched, prefix: string, expr: string) => {
+        const compact = expr.trim();
+
+        if (
+          !compact ||
+          compact.startsWith("$") ||
+          !looksLikeMathSegment(compact) ||
+          !/[\\_^=+\-*/√∛∜±]|[A-Za-z]_[A-Za-z0-9]+/.test(compact)
+        ) {
+          return matched;
+        }
+
+        return `${prefix}$${compact}$`;
+      },
+    )
     .replace(
       /(^|[\s(（=:：，,；;])([+\-]?(?:\\(?:d?frac|tfrac)\s*\{[^{}]+\}\s*\{[^{}]+\}|\\sqrt(?:\[[^\]]+\])?(?:\{[^{}]+\}|[A-Za-z0-9])))(?=$|[\s)）=:：，,；;。.!！?？])/g,
       (_, prefix: string, expr: string) => `${prefix}$${expr}$`,
