@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSearchParams } from "next/navigation";
-import { getAppMeta, setAppMeta } from "@/lib/client/app-meta-store";
 
-const STORAGE_KEY = "class-candy-entry-complete";
+const STORAGE_KEY = "class-candy-entry-session-complete";
 const FALLING_WRAPPERS = [
   { left: "6%", delay: "0ms", duration: "2580ms", scale: 0.72, rotate: "-18deg", drift: "-4vw" },
   { left: "14%", delay: "120ms", duration: "2360ms", scale: 0.58, rotate: "12deg", drift: "3vw" },
@@ -32,15 +31,16 @@ export function EntranceGate() {
   useEffect(() => {
     let cancelled = false;
 
-    void getAppMeta(STORAGE_KEY).then((value) => {
-      if (cancelled) {
-        return;
-      }
+    if (typeof window === "undefined") {
+      return;
+    }
 
-      const completed = value === "true";
+    const completed = window.sessionStorage.getItem(STORAGE_KEY) === "true";
+
+    if (!cancelled) {
       setOpen(forcedOpen || (isHomePage && !completed));
       setChecked(true);
-    });
+    }
 
     return () => {
       cancelled = true;
@@ -68,7 +68,7 @@ export function EntranceGate() {
     setIsClosing(true);
 
     window.setTimeout(() => {
-      void setAppMeta(STORAGE_KEY, "true");
+      window.sessionStorage.setItem(STORAGE_KEY, "true");
       setOpen(false);
       setIsClosing(false);
     }, 520);
