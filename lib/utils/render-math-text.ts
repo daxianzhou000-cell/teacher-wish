@@ -65,6 +65,9 @@ function toUnicodeScript(value: string, map: Record<string, string>): string | n
 
 function stripMathDelimiters(value: string): string {
   return value
+    .replace(/[\uFFFD\u21B5\u23CE]/g, "")
+    .replace(/[\u200B-\u200F\u2060\uFEFF]/g, "")
+    .replace(/[\uE000-\uF8FF]/g, "")
     .replace(/\$\$([\s\S]*?)\$\$/g, "$1")
     .replace(/\$([^$\n]+)\$/g, "$1")
     .replace(/\\\(([\s\S]*?)\\\)/g, "$1")

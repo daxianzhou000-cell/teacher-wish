@@ -42,6 +42,47 @@ function toBoundedStringList(
   return normalized.length >= min ? normalized : fallback.slice(0, max);
 }
 
+function stripCorruptedMathArtifacts(value: string): string {
+  return value
+    .replace(/[\uFFFD\u21B5\u23CE]/g, "")
+    .replace(/[\u200B-\u200F\u2060\uFEFF]/g, "")
+    .replace(/[\uE000-\uF8FF]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function normalizeStageTestMathText(value: string): string {
+  return stripCorruptedMathArtifacts(value)
+    .replace(/\$\$/g, "")
+    .replace(/(^|[^\\])\$+/g, "$1")
+    .replace(/([A-D])\./g, " $1.")
+    .replace(/([（(]\s*)([A-D])\./g, "$1$2.")
+    .replace(/\\frac(?!\s*\{)\s*([A-Za-z0-9]+)\s*([A-Za-z0-9()+\-^]+)/g, "\\frac{$1}{$2}")
+    .replace(/\\sqrt(?!\s*\[)(?!\s*\{)\s*([A-Za-z0-9])/g, "\\sqrt{$1}")
+    .replace(/\s*\\sqrt-\s*/g, " \\sqrt{-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isCorruptedStageTestText(value: string): boolean {
+  const compact = value.replace(/\s+/g, "");
+
+  if (!compact) {
+    return true;
+  }
+
+  const dollarCount = (compact.match(/\$/g) ?? []).length;
+
+  return (
+    /[\uFFFD\u21B5\u23CE]/.test(value) ||
+    /\\frac(?!\s*\{)/.test(value) ||
+    /\\sqrt-\s*\$?$/.test(value) ||
+    dollarCount >= 2 ||
+    /[A-Za-z0-9)]\$\$?/.test(value) ||
+    /\$\$?[A-Za-z0-9(\\]/.test(value)
+  );
+}
+
 function isQuestionType(value: unknown): value is StageTestQuestionType {
   return value === "选择题" || value === "填空题" || value === "解答题";
 }
@@ -66,22 +107,26 @@ function isInvalidStageTestQuestion(prompt: string): boolean {
 }
 
 function normalizeStageTestPrompt(prompt: string): string {
-  return prompt
+  return normalizeStageTestMathText(
+    prompt
     .replace(/^\d+[.、]\s*/, "")
     .replace(/（(选择题|填空题|解答题)）/g, "")
-    .trim();
+    .trim(),
+  );
 }
 
 function sanitizeStageTestAnswer(answer: string): string {
-  return answer.replace(/^参考答案[:：]\s*/g, "").trim();
+  return normalizeStageTestMathText(answer.replace(/^参考答案[:：]\s*/g, "").trim());
 }
 
 function sanitizeStageTestAnalysis(analysis: string): string {
-  return analysis
+  return normalizeStageTestMathText(
+    analysis
     .replace(/^(解析提示|解析)[:：]\s*/g, "")
     .replace(/（?修正[:：][^）)]*）?/g, "")
     .replace(/修正[:：].*$/g, "")
-    .trim();
+    .trim(),
+  );
 }
 
 function isWeakAnalysis(text: string): boolean {
@@ -263,7 +308,7 @@ function normalizeQuestions(
   const filteredOut: string[] = [];
 
   const normalized = value
-    .map((item) => {
+    .map((item, index) => {
       if (!isRecord(item)) {
         return null;
       }
@@ -273,6 +318,10 @@ function normalizeQuestions(
 
       if (!prompt) {
         return null;
+      }
+
+      if (isCorruptedStageTestText(prompt)) {
+        return fallback[index] ?? null;
       }
 
       if (isInvalidStageTestQuestion(prompt)) {
@@ -325,7 +374,7 @@ function normalizeAnswerAnalysis(
           ? buildStageTestAnalysisFallback(question, answer)
           : rawAnalysis;
 
-      if (!answer || !analysis) {
+      if (!answer || !analysis || isCorruptedStageTestText(answer) || isCorruptedStageTestText(analysis)) {
         return null;
       }
 

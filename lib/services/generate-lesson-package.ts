@@ -8,6 +8,32 @@ import {
 import type { GenerateRequest, GenerateResult } from "@/lib/types/lesson-package";
 import type { ModelConnectionSettings, ModelSettings } from "@/lib/types/model-settings";
 
+function shouldRetryProviderError(message: string): boolean {
+  return /memory overloaded|system memory|rate limit|too many requests|timeout|timed out|service unavailable|upstream|temporarily unavailable|overloaded|busy/i.test(
+    message,
+  );
+}
+
+function normalizeProviderErrorMessage(provider: string, message: string): string {
+  if (/memory overloaded|system memory|overloaded|busy/i.test(message)) {
+    return `${provider}：当前内置平台节点繁忙或资源不足，请稍后重试；若已配置备用模型，系统会自动尝试切换。`;
+  }
+
+  if (/rate limit|too many requests/i.test(message)) {
+    return `${provider}：当前内置平台请求过多，已触发限流，请稍后再试。`;
+  }
+
+  if (/timeout|timed out|service unavailable|upstream|temporarily unavailable/i.test(message)) {
+    return `${provider}：当前内置平台响应超时或上游服务不可用，请稍后重试。`;
+  }
+
+  return `${provider}: ${message}`;
+}
+
+async function waitBeforeRetry(delayMs: number) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 export async function generateLessonPackage(
   input: GenerateRequest,
   modelSettingsOverride?: ModelSettings,
@@ -49,13 +75,25 @@ export async function generateLessonPackage(
 
   for (const config of attempts) {
     const provider = getLessonPackageProviderByName(config.provider);
+    const providerLabel = config.provider === "custom" ? "内置模型" : config.provider;
 
-    try {
-      const rawResult = await provider.generateLessonPackage(input, { prompt, config });
-      return normalizeGenerateResult(input, rawResult);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "模型调用失败。";
-      errors.push(`${config.provider}: ${message}`);
+    for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+      try {
+        const rawResult = await provider.generateLessonPackage(input, { prompt, config });
+        return normalizeGenerateResult(input, rawResult);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "模型调用失败。";
+        const retryable = shouldRetryProviderError(message);
+        const isLastTry = attemptIndex === 1;
+
+        if (retryable && !isLastTry) {
+          await waitBeforeRetry(800);
+          continue;
+        }
+
+        errors.push(normalizeProviderErrorMessage(providerLabel, message));
+        break;
+      }
     }
   }
 
