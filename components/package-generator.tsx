@@ -146,6 +146,51 @@ function toPersistedGenerateRequest(input: GenerateRequest): GenerateRequest {
   };
 }
 
+function isVagueSuggestionText(value: string): boolean {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  return /继续安排下一次补习|继续围绕同一知识点|分层训练|先稳住基础|逐步加入变式题|讲解\s*\+\s*练习\s*\+\s*讲评|重点加强易错点复盘|暴露出的薄弱环节|保持节奏|继续巩固基础|针对性补习/.test(
+    normalized,
+  );
+}
+
+function buildHistoricalSuggestionPreview(prefill: FollowUpPrefill) {
+  const topic = prefill.sourceTopic.trim() || "当前知识点";
+  const feedback = prefill.sourceFeedback.trim();
+  const suggestion = prefill.sourceSuggestion.trim();
+  const rawIssue = feedback || suggestion;
+  const mentionsCalculation = /计算|运算|代入|符号|括号|抄写|粗心/i.test(rawIssue);
+  const mentionsFormula = /公式|判别式|配方|因式分解|平方差|完全平方/i.test(rawIssue);
+
+  const summary = isVagueSuggestionText(suggestion)
+    ? mentionsCalculation
+      ? `下一轮先别急着讲新题，先把“${topic}”里最影响得分的计算环节重新补一遍。`
+      : `下一轮围绕“${topic}”继续补，但要先把老师反馈里提到的具体薄弱点拆开处理。`
+    : suggestion;
+
+  const actions = [
+    mentionsCalculation
+      ? "先做 3 题纯计算诊断，判断到底卡在代入、符号还是化简。"
+      : `先用 5 分钟短诊断确认“${topic}”里最卡的具体环节。`,
+    mentionsFormula
+      ? "把公式判断、条件识别和代入顺序分开练，不要一上来就做综合题。"
+      : `针对“${topic}”里最容易错的步骤，先讲 1 题，再跟 1 题同型练习。`,
+    mentionsCalculation
+      ? "结尾把本节做错的计算题重新独立算一遍，要求学生自己指出错在第几步。"
+      : "结尾留 5 分钟做错题回看，要求学生复述方法和易错点。",
+  ];
+
+  return {
+    summary,
+    actions,
+    originalSuggestion: suggestion,
+  };
+}
+
 function SelectField<T extends string | number>({
   label,
   value,
@@ -439,6 +484,9 @@ export function PackageGenerator({
   const linkedFollowUpStudentId =
     followUpContext?.studentId?.trim() || initialStudentId || "";
   const resolvedRecordStudentId = selectedStudentId || linkedFollowUpStudentId || "";
+  const historicalSuggestionPreview = followUpContext
+    ? buildHistoricalSuggestionPreview(followUpContext)
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -1248,19 +1296,33 @@ export function PackageGenerator({
                   <p className="mt-1">
                     上期反馈：{followUpContext.sourceFeedback || "未提供上期反馈。"}
                   </p>
-                  <p className="mt-1">
-                    历史建议（仅供参考）：{followUpContext.sourceSuggestion || "本次会重新生成新的下一步建议。"}
-                  </p>
+                  {historicalSuggestionPreview ? (
+                    <div className="mt-2 space-y-2">
+                      <p>
+                        历史建议（结构化参考）：{historicalSuggestionPreview.summary}
+                      </p>
+                      <ul className="list-disc space-y-1 pl-5 text-[#7A5E68]">
+                        {historicalSuggestionPreview.actions.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                      {historicalSuggestionPreview.originalSuggestion ? (
+                        <p className="text-xs leading-6 text-[#9C7180]">
+                          原始建议：{historicalSuggestionPreview.originalSuggestion}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="mt-1">历史建议（仅供参考）：本次会重新生成新的下一步建议。</p>
+                  )}
                   {!followUpContext.sourceFeedback ? (
                     <p className="mt-2 text-xs leading-6 text-[#9C7180]">
                       没有老师反馈也可以直接继续；如果补一句薄弱点，下一次资料会更贴合真实问题。
                     </p>
                   ) : null}
-                  {followUpContext.sourceSuggestion ? (
-                    <p className="mt-2 text-xs leading-6 text-[#9C7180]">
-                      这条是上一轮记录里保存的旧建议，本次重新生成后，下方结果区会给出新的下一步安排。
-                    </p>
-                  ) : null}
+                  <p className="mt-2 text-xs leading-6 text-[#9C7180]">
+                    这条是上一轮记录里保存的历史建议，本次重新生成后，下方结果区会给出新的下一步安排。
+                  </p>
                 </div>
               ) : null}
             </div>
