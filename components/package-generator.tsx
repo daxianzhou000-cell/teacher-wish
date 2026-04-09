@@ -107,7 +107,6 @@ type GeneratorDraft = {
   form: GenerateRequest;
   selectedStudentId: string;
   followUpPrefill: FollowUpPrefill | null;
-  showFollowUpDetails: boolean;
   result: LessonPackage | null;
   resultTopic: string;
   resultJobId: string;
@@ -434,7 +433,6 @@ export function PackageGenerator({
   const [savedRecord, setSavedRecord] = useState<TutoringRecord | null>(null);
   const [hasExportedResult, setHasExportedResult] = useState(false);
   const [followUpContext, setFollowUpContext] = useState<FollowUpPrefill | null>(initialFollowUpPrefill);
-  const [showFollowUpDetails, setShowFollowUpDetails] = useState(!initialFollowUpPrefill);
   const [activeTool, setActiveTool] = useState<"bind" | "export" | null>(null);
   const selectedStudent =
     students.find((student) => student.id === selectedStudentId) ?? null;
@@ -551,10 +549,6 @@ export function PackageGenerator({
 
           if (parsed.followUpPrefill) {
             setFollowUpContext(parsed.followUpPrefill);
-          }
-
-          if (typeof parsed.showFollowUpDetails === "boolean") {
-            setShowFollowUpDetails(parsed.showFollowUpDetails);
           }
 
           if (parsed.result) {
@@ -685,7 +679,6 @@ export function PackageGenerator({
       form,
       selectedStudentId,
       followUpPrefill: followUpContext,
-      showFollowUpDetails,
       result,
       resultTopic,
       resultJobId,
@@ -715,7 +708,6 @@ export function PackageGenerator({
     stageTestResult,
     savedRecord,
     selectedStudentId,
-    showFollowUpDetails,
     teacherFeedback,
     hasExportedResult,
   ]);
@@ -1268,15 +1260,6 @@ export function PackageGenerator({
                       这条是上一轮记录里保存的旧建议，本次重新生成后，下方结果区会给出新的下一步安排。
                     </p>
                   ) : null}
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowFollowUpDetails((current) => !current)}
-                      className="rounded-full border border-white/85 bg-[rgba(255,255,255,0.7)] px-4 py-2 text-xs font-semibold text-[#7A5E68] transition hover:bg-white"
-                    >
-                      {showFollowUpDetails ? "收起补充项" : "补充细节（可选）"}
-                    </button>
-                  </div>
                 </div>
               ) : null}
             </div>
@@ -1466,7 +1449,7 @@ export function PackageGenerator({
                 </div>
               ) : null}
 
-              {form.mode === "follow_up" && (showFollowUpDetails || !followUpContext) ? (
+              {form.mode === "follow_up" && !followUpContext ? (
                 <div className="mx-auto w-full max-w-4xl space-y-4 rounded-[28px] border border-white/82 bg-[rgba(255,255,255,0.54)] p-4 backdrop-blur-md">
                   {!(form.followUpContext?.teacherRemark ?? "").trim() ? (
                     <div className="rounded-[20px] border border-dashed border-[#E9D7B8] bg-[rgba(255,250,239,0.72)] px-4 py-3 text-xs leading-6 text-[#8E735E]">
