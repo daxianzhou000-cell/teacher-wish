@@ -153,7 +153,11 @@ function replaceLatexFunctions(value: string): string {
     .replaceAll("\\mu", "μ")
     .replaceAll("\\Delta", "Δ")
     .replaceAll("\\triangle", "△")
-    .replaceAll("\\angle", "∠");
+    .replaceAll("\\angle", "∠")
+    .replaceAll("\\overline", "")
+    .replaceAll("\\overrightarrow", "")
+    .replaceAll("\\vec", "")
+    .replaceAll("\\text", "");
 }
 
 function cleanupLatexBraces(value: string): string {
@@ -179,6 +183,18 @@ function replaceLatexOperators(value: string): string {
     .replaceAll("\\because", "∵")
     .replaceAll("\\therefore", "∴")
     .replaceAll("\\infty", "∞")
+    .replaceAll("\\in", "∈")
+    .replaceAll("\\notin", "∉")
+    .replaceAll("\\subseteq", "⊆")
+    .replaceAll("\\supseteq", "⊇")
+    .replaceAll("\\cup", "∪")
+    .replaceAll("\\cap", "∩")
+    .replaceAll("\\varnothing", "∅")
+    .replaceAll("\\emptyset", "∅")
+    .replaceAll("\\mid", "|")
+    .replaceAll("\\to", "→")
+    .replaceAll("\\rightarrow", "→")
+    .replaceAll("\\leftarrow", "←")
     .replaceAll("\\left", "")
     .replaceAll("\\right", "");
 }

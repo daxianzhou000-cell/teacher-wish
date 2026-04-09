@@ -143,6 +143,44 @@ function normalizeEquationSystems(value: string): string {
         .filter(Boolean);
 
       return lines.length >= 2 ? `\\begin{cases}${lines.join("\\\\")}\\end{cases}` : matched;
+    })
+    .replace(
+      /([A-Za-z0-9+\-*/^_()\\]+(?:=|≤|≥|<|>)[^，。；;\n]+)[；;]\s*([A-Za-z0-9+\-*/^_()\\]+(?:=|≤|≥|<|>)[^，。；;\n]+)/g,
+      (_, left: string, right: string) => `\\begin{cases}${left.trim()}\\\\${right.trim()}\\end{cases}`,
+    )
+    .replace(
+      /([A-Za-z0-9+\-*/^_()\\]+(?:=|≤|≥|<|>)[^\n]+)\n([A-Za-z0-9+\-*/^_()\\]+(?:=|≤|≥|<|>)[^\n]+)/g,
+      (_, left: string, right: string) => `\\begin{cases}${left.trim()}\\\\${right.trim()}\\end{cases}`,
+    );
+}
+
+function normalizeGeometryNotation(value: string): string {
+  return value
+    .replace(/([A-Z]{2})\s*∥\s*([A-Z]{2})/g, "$$$1\\parallel $2$")
+    .replace(/([A-Z]{2})\s*⊥\s*([A-Z]{2})/g, "$$$1\\perp $2$")
+    .replace(/∠\s*([A-Z]{3,4})/g, "$\\angle $1$")
+    .replace(/△\s*([A-Z]{3,4})/g, "$\\triangle $1$")
+    .replace(/([A-Z]{2})\s*=\s*([A-Z]{2})/g, "$$$1=$2$")
+    .replace(/([A-Z]{1,2})([0-9]+)\s*∥\s*([A-Z]{1,2})([0-9]+)/g, "$$1_{$2}\\parallel $3_{$4}$");
+}
+
+function normalizeChainedMathLines(value: string): string {
+  return value.replace(
+    /(^|[\n])((?:[A-Za-z0-9_{}^()+\-*/\\]+|\\frac\{[^{}]+\}\{[^{}]+\}|\\sqrt(?:\[[^\]]+\])?\{[^{}]+\})(?:\s*[=≈≠≤≥<>]\s*(?:[A-Za-z0-9_{}^()+\-*/\\]+|\\frac\{[^{}]+\}\{[^{}]+\}|\\sqrt(?:\[[^\]]+\])?\{[^{}]+\})){2,})(?=$|[\n])/g,
+    (_, prefix: string, expr: string) => `${prefix}$$${expr.trim()}$$`,
+  );
+}
+
+function normalizeInequalityGroups(value: string): string {
+  return value.replace(
+    /\{([^{}]*(?:≤|≥|<|>)[^{}]*[，,；;\n][^{}]*(?:≤|≥|<|>)[^{}]*)\}/g,
+    (matched, content: string) => {
+      const parts = content
+        .split(/[，,；;\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      return parts.length >= 2 ? `\\begin{cases}${parts.join("\\\\")}\\end{cases}` : matched;
     });
 }
 
@@ -204,11 +242,139 @@ function normalizeGeometryPointLabels(value: string): string {
   );
 }
 
+function normalizeMalformedFractions(value: string): string {
+  const inferBareFractionParts = (compact: string) => {
+    const normalized = compact.replace(/\s+/g, "").replace(/[+\-]+$/, "");
+
+    if (!normalized || normalized.includes("{") || normalized.includes("}")) {
+      return null;
+    }
+
+    const matched = normalized.match(
+      /^(.+)([A-Za-z](?:\^\{[^{}]+\}|\^[A-Za-z0-9]+)?(?:[+\-][A-Za-z0-9^()]+)+)$/,
+    );
+
+    if (!matched) {
+      return null;
+    }
+
+    const numerator = matched[1]?.trim();
+    const denominator = matched[2]?.trim();
+
+    if (!numerator || !denominator) {
+      return null;
+    }
+
+    return { numerator, denominator };
+  };
+
+  const inferLongFractionParts = (compact: string) => {
+    const normalized = compact.replace(/\s+/g, "").replace(/[+\-]+$/, "");
+
+    if (!normalized || normalized.includes("{") || normalized.includes("}")) {
+      return null;
+    }
+
+    const tailPatterns = [
+      /^(.*)(\([A-Za-z0-9+\-*/^]+\))$/,
+      /^(.*)([A-Za-z](?:\^\{[^{}]+\}|\^[A-Za-z0-9]+)?(?:[+\-][A-Za-z0-9^()]+)+)$/,
+      /^(.*)([A-Za-z](?:\^\{[^{}]+\}|\^[A-Za-z0-9]+)?)$/,
+    ];
+
+    for (const pattern of tailPatterns) {
+      const matched = normalized.match(pattern);
+
+      if (!matched) {
+        continue;
+      }
+
+      const numerator = matched[1]?.trim();
+      const denominator = matched[2]?.trim();
+
+      if (!numerator || !denominator || numerator === denominator) {
+        continue;
+      }
+
+      if (!/[A-Za-z0-9)]/.test(numerator) || !/[A-Za-z0-9)]/.test(denominator)) {
+        continue;
+      }
+
+      return { numerator, denominator };
+    }
+
+    return null;
+  };
+
+  return value
+    .replace(
+      /\\(?:d?frac|tfrac)\s*([A-Za-z0-9]+)\s*([A-Za-z0-9^()+\-]+)(?=(?:\s|\\[A-Za-z]|[，,。.!！?？；;]|$))/g,
+      (_, numerator: string, denominator: string) => {
+        const cleanedDenominator = denominator.replace(/[+\-]+$/, "");
+        if (!cleanedDenominator || !/[A-Za-z]/.test(cleanedDenominator)) {
+          return `\\frac{${numerator}}{${denominator}}`;
+        }
+        return `\\frac{${numerator}}{${cleanedDenominator}}`;
+      },
+    )
+    .replace(/\\(?:d?frac|tfrac)\s*\{([^{}]+)\}\s*([A-Za-z0-9^()+\-]+)(?=(?:\s|\\[A-Za-z]|[，,。.!！?？；;]|$))/g, "\\frac{$1}{$2}")
+    .replace(
+      /\\(?:d?frac|tfrac)\s*([^\\$，,。.!！?？；;\n]+?)(?=(?:[+\-]\s*\\(?:d?frac|tfrac))|[，,。.!！?？；;\n]|$)/g,
+      (matched, expr: string) => {
+        const inferred = inferBareFractionParts(expr) ?? inferLongFractionParts(expr);
+        return inferred ? `\\frac{${inferred.numerator}}{${inferred.denominator}}` : matched;
+      },
+    );
+}
+
+function normalizeMalformedRoots(value: string): string {
+  return value
+    .replace(/\\sqrt\s*([A-Za-z0-9])(?=$|[\s，,。.!！?？；;)）])/g, "\\sqrt{$1}")
+    .replace(/\\sqrt\{([^{}]+)\}\s*\^\{?([0-9]+)\}?/g, "(\\\\sqrt{$1})^{$2}")
+    .replace(/\\sqrt\(([^()]+)\)/g, "\\sqrt{$1}");
+}
+
+function normalizeAbsoluteValues(value: string): string {
+  return value
+    .replace(/\|([^|\n]+)\|\s*\^\{?([0-9]+)\}?/g, "\\left|$1\\right|^{$2}")
+    .replace(/\|([^|\n]+)\|/g, "\\left|$1\\right|");
+}
+
+function normalizeMalformedDollarMath(value: string): string {
+  return value
+    .replace(
+      /\$([0-9]+)\$\s*(\\(?:d?frac|tfrac)\s*\{[^{}]+\}\s*\{[^{}]+\})/g,
+      (_, integerPart: string, fractionPart: string) => `$${integerPart}${fractionPart}$`,
+    )
+    .replace(
+      /((?:[A-Za-z0-9_{}^()+\-*/=±\\]+)\s*=\s*(?:[A-Za-z0-9_{}^()+\-*/=±\\]+|\\(?:d?frac|tfrac|sqrt)[\s\S]*?))\$\$(?=[。.!！?？；;，,）)]|$)/g,
+      (_, expr: string) => `$${expr.trim()}$`,
+    )
+    .replace(
+      /(\\(?:d?frac|tfrac|sqrt)(?:\[[^\]]+\])?(?:\{[^{}]+\}|[A-Za-z0-9])(?:\s*\{[^{}]+\})?)\$\$(?=[。.!！?？；;，,）)]|$)/g,
+      (_, expr: string) => `$${expr.trim()}$`,
+    )
+    .replace(/\$\$(?=[。.!！?？；;，,）)]|$)/g, "");
+}
+
 function normalizeBareLatex(value: string): string {
-  return normalizeGeometryPointLabels(
-    normalizeImplicitSubscripts(
-      normalizeUnicodeScripts(
-        normalizeUnicodeOperators(normalizeEquationSystems(normalizeUnicodeRoots(value))),
+  return normalizeMalformedDollarMath(
+    normalizeChainedMathLines(
+      normalizeGeometryNotation(
+        normalizeInequalityGroups(
+          normalizeAbsoluteValues(
+            normalizeMalformedRoots(
+              normalizeMalformedFractions(
+                normalizeGeometryPointLabels(
+                  normalizeImplicitSubscripts(
+                    normalizeUnicodeScripts(
+                      normalizeUnicodeOperators(normalizeEquationSystems(normalizeUnicodeRoots(value))),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     ),
   )
@@ -285,28 +451,65 @@ function tokenizeMath(value: string): MathToken[] {
   );
 }
 
-function renderFormula(value: string, display: boolean, key: string) {
-  const html = katex.renderToString(value, {
-    displayMode: display,
-    throwOnError: false,
-    strict: "ignore",
-    trust: false,
-  });
+function repairFormulaForKatex(value: string): string {
+  return value
+    .trim()
+    .replace(/\$\$/g, "")
+    .replace(/\$\(/g, "(")
+    .replace(/\)\$/g, ")")
+    .replace(/\$([A-Za-z0-9])/g, "$1")
+    .replace(/([A-Za-z0-9)])\$/g, "$1")
+    .replace(/\s+/g, " ");
+}
+
+function looksLikeDisplayMathLine(value: string): boolean {
+  const compact = repairFormulaForKatex(value).trim();
+
+  if (!compact) {
+    return false;
+  }
+
+  const relationCount = (compact.match(/[=≈≠≤≥<>]/g) ?? []).length;
 
   return (
-    <span
-      key={key}
-      className={
-        display
-          ? "class-candy-math class-candy-math-display"
-          : "class-candy-math class-candy-math-inline"
-      }
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    /^[=≈≠≤≥<>+\-±∴∵]/.test(compact) ||
+    /^\\(?:begin|frac|dfrac|tfrac|sqrt)/.test(compact) ||
+    relationCount >= 2
   );
 }
 
+function renderFormula(value: string, display: boolean, key: string) {
+  const repaired = repairFormulaForKatex(value);
+
+  try {
+    const html = katex.renderToString(repaired, {
+      displayMode: display,
+      throwOnError: true,
+      strict: "ignore",
+      trust: false,
+    });
+
+    return (
+      <span
+        key={key}
+        className={
+          display
+            ? "class-candy-math class-candy-math-display"
+            : "class-candy-math class-candy-math-inline"
+        }
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  } catch {
+    return <Fragment key={key}>{renderMathText(repaired)}</Fragment>;
+  }
+}
+
 function renderLine(line: string, lineKey: string): ReactNode {
+  if (looksLikeDisplayMathLine(line)) {
+    return <div key={lineKey}>{renderFormula(line, true, `${lineKey}-display-auto`)}</div>;
+  }
+
   const tokens = tokenizeMath(line);
 
   if (

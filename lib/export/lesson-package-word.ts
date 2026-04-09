@@ -581,6 +581,7 @@ export function downloadLessonPackageAsWord(params: {
           p, li { margin: 6px 0; font-size: 12pt; }
           ul, ol { padding-left: 24px; }
           .section { margin-bottom: 12px; }
+          .math-display-line { margin: 8px 0 8px 2em; }
           math { font-size: 1em; }
           mfrac { font-size: 1em; }
         </style>

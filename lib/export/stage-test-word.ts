@@ -69,6 +69,7 @@ export function downloadStageTestAsWord(
           p, li { margin: 6px 0; font-size: 12pt; }
           ol, ul { padding-left: 24px; }
           .section { margin-bottom: 12px; }
+          .math-display-line { margin: 8px 0 8px 2em; }
           .answer-space { margin-top: 10px; }
           .answer-line { border-bottom: 1px solid #d8deea; height: 22px; margin-bottom: 6px; }
         </style>
