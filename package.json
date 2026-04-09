@@ -7,7 +7,7 @@
     "dev:reset": "rm -rf .next-dev && next dev",
     "build": "next build",
     "build:clean": "rm -rf .next && next build",
-    "start": "next start",
+    "start": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "clean": "rm -rf .next .next-dev",
     "clean:dev": "rm -rf .next-dev",
