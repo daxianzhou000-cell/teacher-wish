@@ -522,7 +522,7 @@ export function PackageGenerator({
       const isReload = navigationEntry?.type === "reload";
       const shouldRestoreDraft =
         Boolean(savedDraft) &&
-        (resumeDraft || Boolean(savedJobId) || Boolean(initialFollowUpPrefill) || !isReload);
+        (resumeDraft || Boolean(savedJobId) || Boolean(initialFollowUpPrefill));
 
       if (shouldRestoreDraft) {
         try {
@@ -616,8 +616,9 @@ export function PackageGenerator({
         } catch {
           void removeAppMeta(DRAFT_STORAGE_KEY);
         }
-      } else if (isReload && !savedJobId && !initialFollowUpPrefill && !resumeDraft) {
+      } else if (!savedJobId && !initialFollowUpPrefill && !resumeDraft) {
         void removeAppMeta(DRAFT_STORAGE_KEY);
+        void removeAppMeta(ACTIVE_FORM_STORAGE_KEY);
       } else if (savedForm) {
         try {
           const parsed = JSON.parse(savedForm) as GenerateRequest;
