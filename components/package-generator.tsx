@@ -489,10 +489,8 @@ export function PackageGenerator({
                 ? "一般"
                 : "一般",
           masteredContent: "",
-          weakContent: initialFollowUpPrefill.sourceSuggestion || "",
-          teacherRemark: [initialFollowUpPrefill.sourceFeedback, initialFollowUpPrefill.sourceSuggestion]
-            .filter(Boolean)
-            .join("\n"),
+          weakContent: initialFollowUpPrefill.sourceFeedback || "",
+          teacherRemark: initialFollowUpPrefill.sourceFeedback || "",
         },
       };
     });
@@ -1258,11 +1256,16 @@ export function PackageGenerator({
                     上期反馈：{followUpContext.sourceFeedback || "未提供上期反馈。"}
                   </p>
                   <p className="mt-1">
-                    下一步建议：{followUpContext.sourceSuggestion || "已自动带入为下一次备课。"}
+                    历史建议（仅供参考）：{followUpContext.sourceSuggestion || "本次会重新生成新的下一步建议。"}
                   </p>
                   {!followUpContext.sourceFeedback ? (
                     <p className="mt-2 text-xs leading-6 text-[#9C7180]">
                       没有老师反馈也可以直接继续；如果补一句薄弱点，下一次资料会更贴合真实问题。
+                    </p>
+                  ) : null}
+                  {followUpContext.sourceSuggestion ? (
+                    <p className="mt-2 text-xs leading-6 text-[#9C7180]">
+                      这条是上一轮记录里保存的旧建议，本次重新生成后，下方结果区会给出新的下一步安排。
                     </p>
                   ) : null}
                   <div className="mt-3">
@@ -1720,7 +1723,7 @@ export function PackageGenerator({
 
               <div className="grid gap-4 xl:grid-cols-3">
                 <div className="rounded-[22px] border border-white/85 bg-[rgba(255,255,255,0.72)] px-4 py-4">
-                  <p className="text-sm font-semibold text-[#6A5E55]">继续巩固</p>
+                  <p className="text-sm font-semibold text-[#6A5E55]">保留并延续</p>
                   <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[#5E554D]">
                     {nextLessonSuggestion.continueFocus.map((item) => (
                       <li key={item}>{item}</li>
@@ -1736,7 +1739,7 @@ export function PackageGenerator({
                   </ul>
                 </div>
                 <div className="rounded-[22px] border border-white/85 bg-[rgba(255,255,255,0.72)] px-4 py-4">
-                  <p className="text-sm font-semibold text-[#6A5E55]">教学策略</p>
+                  <p className="text-sm font-semibold text-[#6A5E55]">下一课怎么上</p>
                   <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[#5E554D]">
                     {nextLessonSuggestion.teachingStrategy.map((item) => (
                       <li key={item}>{item}</li>

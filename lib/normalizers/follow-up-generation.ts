@@ -38,6 +38,40 @@ function toBoundedStringList(
   return normalized.length >= min ? normalized : fallback.slice(0, max);
 }
 
+function isVagueSuggestionText(value: string): boolean {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  return /继续安排下一次补习|继续围绕同一知识点|分层训练|先稳住基础|逐步加入变式题|讲解\s*\+\s*练习\s*\+\s*讲评|重点加强易错点复盘|暴露出的薄弱环节|保持节奏|继续巩固基础|针对性补习/.test(
+    normalized,
+  );
+}
+
+function blendSpecificList(
+  candidate: string[],
+  fallback: string[],
+  min: number,
+  max: number,
+): string[] {
+  const specificItems = candidate.filter((item) => !isVagueSuggestionText(item));
+  const merged = [...specificItems];
+
+  for (const item of fallback) {
+    if (merged.length >= max) {
+      break;
+    }
+
+    if (!merged.includes(item)) {
+      merged.push(item);
+    }
+  }
+
+  return merged.length >= min ? merged.slice(0, max) : fallback.slice(0, max);
+}
+
 function buildSuggestionFallback(
   topic: string,
   followUpContext: FollowUpContext,
@@ -94,12 +128,42 @@ function normalizeNextLessonSuggestion(
     return fallback;
   }
 
+  const goalCandidate = toNonEmptyString(value.goal, fallback.goal);
+  const continueFocusCandidate = toBoundedStringList(
+    value.continueFocus,
+    fallback.continueFocus,
+    2,
+    4,
+  );
+  const weakPointFocusCandidate = toBoundedStringList(
+    value.weakPointFocus,
+    fallback.weakPointFocus,
+    2,
+    4,
+  );
+  const teachingStrategyCandidate = toBoundedStringList(
+    value.teachingStrategy,
+    fallback.teachingStrategy,
+    3,
+    5,
+  );
+
   return {
-    goal: toNonEmptyString(value.goal, fallback.goal),
-    continueFocus: toBoundedStringList(value.continueFocus, fallback.continueFocus, 2, 4),
-    weakPointFocus: toBoundedStringList(value.weakPointFocus, fallback.weakPointFocus, 2, 4),
-    teachingStrategy: toBoundedStringList(
-      value.teachingStrategy,
+    goal: isVagueSuggestionText(goalCandidate) ? fallback.goal : goalCandidate,
+    continueFocus: blendSpecificList(
+      continueFocusCandidate,
+      fallback.continueFocus,
+      2,
+      4,
+    ),
+    weakPointFocus: blendSpecificList(
+      weakPointFocusCandidate,
+      fallback.weakPointFocus,
+      2,
+      4,
+    ),
+    teachingStrategy: blendSpecificList(
+      teachingStrategyCandidate,
       fallback.teachingStrategy,
       3,
       5,
